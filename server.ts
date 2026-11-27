@@ -479,6 +479,13 @@ async function startServer() {
     }
   });
 
+  app.get('/favicon.ico', (_req, res) => res.status(204).end());
+
+  // Return JSON 404 for unknown /api/* endpoints instead of falling through to SPA HTML
+  app.all('/api/*', (_req, res) => {
+    res.status(404).json({ error: 'API endpoint not found.' });
+  });
+
   // Mount Vite middleware in dev or serve static dist in production
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
@@ -488,7 +495,9 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distDir = path.resolve(process.cwd(), 'dist');
-    app.use('/My-generator-अब', express.static(distDir));
+    const ghBase = '/My-generator-अब';
+    app.use(ghBase, express.static(distDir));
+    app.use(encodeURI(ghBase), express.static(distDir));
     app.use(express.static(distDir));
     app.get('*', (_req, res) => {
       res.sendFile(path.resolve(distDir, 'index.html'));

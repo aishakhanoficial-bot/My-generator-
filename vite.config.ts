@@ -4,12 +4,11 @@ import fs from 'fs';
 import path from 'path';
 import {defineConfig} from 'vite';
 
-const GITHUB_PAGES_BASE = '/My-generator-अब/';
 const ROOT_DIR = import.meta.dirname;
 
 export default defineConfig(({command}) => {
   return {
-    base: process.env.VITE_BASE_PATH || (command === 'build' ? GITHUB_PAGES_BASE : '/'),
+    base: process.env.VITE_BASE_PATH || (command === 'build' ? './' : '/'),
     plugins: [
       react(),
       tailwindcss(),

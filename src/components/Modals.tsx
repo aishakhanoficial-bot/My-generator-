@@ -264,15 +264,21 @@ export function VideoPlayerModal({
         </div>
 
         <div className="bg-black flex items-center justify-center max-h-[70vh]">
-          <video
-            key={job.id}
-            src={getVideoStreamUrl(job.id)}
-            controls
-            autoPlay
-            loop
-            playsInline
-            className="max-h-[70vh] w-full object-contain"
-          />
+          {getVideoStreamUrl(job.id) ? (
+            <video
+              key={job.id}
+              src={getVideoStreamUrl(job.id)}
+              controls
+              autoPlay
+              loop
+              playsInline
+              className="max-h-[70vh] w-full object-contain"
+            />
+          ) : (
+            <div className="p-10 text-center text-xs text-slate-400">
+              In browser-only mode, rendered video files live in memory for the active session. Re-submit or retry this job to regenerate a playable clip.
+            </div>
+          )}
         </div>
       </div>
     </div>
