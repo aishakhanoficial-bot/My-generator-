@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { JobStatus, SystemMetrics, VideoJob } from '../../shared/types';
+import { getVideoDownloadFilename, getVideoDownloadUrl } from '../api';
 
 interface QueueViewProps {
   jobs: VideoJob[];
@@ -304,7 +305,7 @@ export function QueueView({
                     </td>
                     <td className="py-3 px-4 text-right whitespace-nowrap">
                       <div className="inline-flex items-center justify-end gap-1.5">
-                        {job.status === 'completed' && job.outputFileName && (
+                        {job.status === 'completed' && job.outputFileName && getVideoDownloadUrl(job.id) && (
                           <>
                             <button
                               type="button"
@@ -316,7 +317,8 @@ export function QueueView({
                               Play
                             </button>
                             <a
-                              href={`/api/videos/${encodeURIComponent(job.id)}/download`}
+                              href={getVideoDownloadUrl(job.id)}
+                              download={getVideoDownloadFilename(job)}
                               className="inline-flex items-center gap-1 rounded-md bg-sky-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-sky-500"
                               title="Download video"
                             >

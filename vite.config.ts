@@ -4,14 +4,15 @@ import fs from 'fs';
 import path from 'path';
 import {defineConfig} from 'vite';
 
-export default defineConfig(() => {
+const GITHUB_PAGES_BASE = '/My-generator-अब/';
+
+export default defineConfig(({command}) => {
   return {
+    base: process.env.VITE_BASE_PATH || (command === 'build' ? GITHUB_PAGES_BASE : '/'),
     plugins: [
       react(),
       tailwindcss(),
-      // Copies src/assets into dist/ so root-relative URLs like
-      // "/src/assets/images/..." (e.g. generate_image output) still resolve
-      // in production builds. Do not remove.
+      // Copies src/assets into dist/ and adds GitHub Pages 404.html / .nojekyll files.
       {
         name: 'copy-unbundled-src-assets',
         apply: 'build',
@@ -24,6 +25,11 @@ export default defineConfig(() => {
           const distAssets = path.resolve(distDir, 'src/assets');
           if (fs.existsSync(distDir) && fs.existsSync(srcAssets)) {
             fs.cpSync(srcAssets, distAssets, {recursive: true, force: true});
+          }
+          const indexHtml = path.resolve(distDir, 'index.html');
+          if (fs.existsSync(indexHtml)) {
+            fs.copyFileSync(indexHtml, path.resolve(distDir, '404.html'));
+            fs.writeFileSync(path.resolve(distDir, '.nojekyll'), '', 'utf8');
           }
         },
       },

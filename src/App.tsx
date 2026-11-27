@@ -20,7 +20,7 @@ import {
   VideoJob,
   VideoModelSpec,
 } from '../shared/types';
-import { api } from './api';
+import { api, subscribeEvents } from './api';
 import { AdminView } from './components/AdminView';
 import { ModelsView } from './components/ModelsView';
 import { PaidApprovalModal, PolicyModal, VideoPlayerModal } from './components/Modals';
@@ -76,36 +76,27 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    void loadBootstrap();
+    let active = true;
+    let unsubscribe = () => {};
 
-    const es = new EventSource('/api/events');
-    es.addEventListener('state', (evt) => {
-      try {
-        const data = JSON.parse((evt as MessageEvent).data) as {
-          jobs: VideoJob[];
-          metrics: SystemMetrics;
-          models: VideoModelSpec[];
-          config: AdminConfig;
-        };
-        setJobs(data.jobs);
-        setMetrics(data.metrics);
-        setModels(data.models);
-        setConfig(data.config);
-      } catch {
-        // Ignore parse errors
-      }
-    });
-    es.addEventListener('log', (evt) => {
-      try {
-        const entry = JSON.parse((evt as MessageEvent).data) as LogEntry;
-        setLogs((prev) => [entry, ...prev].slice(0, 400));
-      } catch {
-        // Ignore parse errors
-      }
+    void loadBootstrap().then(() => {
+      if (!active) return;
+      unsubscribe = subscribeEvents(
+        (data) => {
+          setJobs(data.jobs);
+          setMetrics(data.metrics);
+          setModels(data.models);
+          setConfig(data.config);
+        },
+        (entry) => {
+          setLogs((prev) => [entry, ...prev].slice(0, 400));
+        }
+      );
     });
 
     return () => {
-      es.close();
+      active = false;
+      unsubscribe();
     };
   }, [loadBootstrap]);
 

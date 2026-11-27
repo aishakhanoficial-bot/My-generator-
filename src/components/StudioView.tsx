@@ -23,6 +23,7 @@ import {
   VideoModelSpec,
   WorkflowType,
 } from '../../shared/types';
+import { getVideoDownloadFilename, getVideoDownloadUrl, getVideoStreamUrl } from '../api';
 
 const WORKFLOW_TABS: Array<{ id: WorkflowType; label: string }> = [
   { id: 'text-to-video', label: 'Text to Video' },
@@ -1002,9 +1003,10 @@ export function StudioView({
                   queued · {metrics.completedCount} completed
                 </p>
               </div>
-              {previewJob && (
+              {previewJob && getVideoDownloadUrl(previewJob.id) && (
                 <a
-                  href={`/api/videos/${encodeURIComponent(previewJob.id)}/download`}
+                  href={getVideoDownloadUrl(previewJob.id)}
+                  download={getVideoDownloadFilename(previewJob)}
                   className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 whitespace-nowrap shrink-0"
                 >
                   <Download className="h-3.5 w-3.5" />
@@ -1013,12 +1015,12 @@ export function StudioView({
               )}
             </div>
 
-            {previewJob ? (
+            {previewJob && getVideoStreamUrl(previewJob.id) ? (
               <div>
                 <div className="bg-black aspect-video flex items-center justify-center">
                   <video
                     key={previewJob.id}
-                    src={`/api/videos/${encodeURIComponent(previewJob.id)}`}
+                    src={getVideoStreamUrl(previewJob.id)}
                     controls
                     autoPlay
                     loop

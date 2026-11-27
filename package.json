@@ -6,8 +6,9 @@
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build",
+    "build:gh-pages": "VITE_BASE_PATH=/My-generator-अब/ vite build",
     "start": "NODE_ENV=production tsx server.ts",
-    "preview": "vite preview",
+    "preview": "vite preview --host 0.0.0.0",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit"
   },

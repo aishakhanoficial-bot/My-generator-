@@ -1,6 +1,7 @@
 import { AlertTriangle, Download, ShieldCheck, X } from 'lucide-react';
 import { useState } from 'react';
 import { VideoJob, VideoModelSpec } from '../../shared/types';
+import { getVideoDownloadFilename, getVideoDownloadUrl, getVideoStreamUrl } from '../api';
 
 interface PaidApprovalModalProps {
   open: boolean;
@@ -244,7 +245,8 @@ export function VideoPlayerModal({
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <a
-              href={`/api/videos/${encodeURIComponent(job.id)}/download`}
+              href={getVideoDownloadUrl(job.id)}
+              download={getVideoDownloadFilename(job)}
               className="inline-flex items-center gap-1.5 rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-500 whitespace-nowrap shrink-0"
             >
               <Download className="h-3.5 w-3.5" />
@@ -264,7 +266,7 @@ export function VideoPlayerModal({
         <div className="bg-black flex items-center justify-center max-h-[70vh]">
           <video
             key={job.id}
-            src={`/api/videos/${encodeURIComponent(job.id)}`}
+            src={getVideoStreamUrl(job.id)}
             controls
             autoPlay
             loop

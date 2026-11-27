@@ -472,6 +472,7 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distDir = path.resolve(process.cwd(), 'dist');
+    app.use('/My-generator-अब', express.static(distDir));
     app.use(express.static(distDir));
     app.get('*', (_req, res) => {
       res.sendFile(path.resolve(distDir, 'index.html'));
