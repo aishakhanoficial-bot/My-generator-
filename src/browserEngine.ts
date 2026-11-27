@@ -249,6 +249,7 @@ function loadPersisted(): StoredBrowserState {
 }
 
 type BrowserSceneTheme =
+  | 'garden'
   | 'spiritual-twilight'
   | 'ocean'
   | 'desert'
@@ -262,23 +263,33 @@ type BrowserSceneTheme =
 function detectBrowserTheme(prompt: string): BrowserSceneTheme {
   const p = prompt.toLowerCase();
   if (
-    /آخرت|تیاری|قبر|جنت|نماز|مسجد|قرآن|دعا|اسلام|اللہ|رمضان|موت|عبادت|ایمان|akhirat|hereafter|mosque|islamic|prayer|quran|crescent|lantern|ramadan|eid|dua|eternity|soul|faith|heaven|spiritual/.test(
+    /garden|flower|flowers|rose|tulip|lavender|jasmine|blossom|butterfly|butterflies|meadow|exotic\s*bird|turquoise.*bird|باغ|پھول|تتلی|چمن/.test(
+      p
+    )
+  ) {
+    return 'garden';
+  }
+  if (/cyber|neon|tokyo|city|rain|futuristic|synth|street|building|car|شہر|رات|shehar/.test(p)) return 'cyber';
+  if (/ocean|sea|water|whale|wave|underwater|coral|jellyfish|beach|river|سمندر|لہر|پانی|دریا|samandar/.test(p)) {
+    return 'ocean';
+  }
+  if (/desert|sand|dune|oasis|camel|sahara|pyramid|صحرا|ریت|sahra/.test(p)) return 'desert';
+  if (/forest|jungle|moss|tree|pine|nature|leaf|wood|جنگل|درخت|jangal/.test(p)) return 'forest';
+  if (/mountain|snow|alpine|peak|cliff|valley|aurora|waterfall|پہاڑ|برف|وادی|pahar/.test(p)) return 'mountain';
+  if (/space|cosmos|galaxy|nebula|star|planet|astronaut|moon|universe|آسمان|ستارے|کائنات|چاند/.test(p)) {
+    return 'cosmos';
+  }
+  if (/mosque|masjid|qabar|grave|قبر|مسجد|نماز|رمضان|eid|ramadan|crescent|lantern/.test(p)) {
+    return 'spiritual-twilight';
+  }
+  if (/sunset|sunrise|dawn|golden hour|amber|fire|lava|candle|غروب|طلوع|سورج|شام/.test(p)) return 'sunset';
+  if (
+    /آخرت|تیاری|قبر|جنت|قرآن|دعا|اسلام|اللہ|موت|عبادت|ایمان|akhirat|hereafter|islamic|prayer|quran|dua|eternity|soul|faith|heaven|spiritual/.test(
       p
     )
   ) {
     return 'spiritual-twilight';
   }
-  if (/ocean|sea|water|whale|wave|underwater|coral|jellyfish|beach|river|سمندر|لہر|پانی/.test(p)) {
-    return 'ocean';
-  }
-  if (/desert|sand|dune|oasis|camel|sahara|pyramid|صحرا|ریت/.test(p)) return 'desert';
-  if (/forest|jungle|moss|tree|pine|nature|garden|leaf|wood|جنگل|درخت/.test(p)) return 'forest';
-  if (/mountain|snow|alpine|peak|cliff|valley|aurora|waterfall|پہاڑ|برف/.test(p)) return 'mountain';
-  if (/cyber|neon|tokyo|city|rain|futuristic|synth|street|building|شہر|رات/.test(p)) return 'cyber';
-  if (/space|cosmos|galaxy|nebula|star|planet|astronaut|moon|universe|آسمان|ستارے|چاند/.test(p)) {
-    return 'cosmos';
-  }
-  if (/sunset|sunrise|dawn|golden hour|amber|fire|lava|candle|غروب|طلوع|سورج/.test(p)) return 'sunset';
   return 'studio';
 }
 
@@ -288,7 +299,7 @@ function cleanBrowserCaption(rawPrompt: string): string {
     .replace(/\b(veo\s*3|veo|sora|runway|master\s*prompt|prompt)\b/gi, ' ')
     .replace(/\b(duration|aspect\s*ratio|resolution|camera|lighting|style)\s*[:：]\s*[^|\n]+/gi, ' ')
     .replace(
-      /\b(exactly\s*\d+\s*seconds?|vertical\s*9:16|horizontal\s*16:9|square\s*1:1|9:16|16:9|1:1|ultra\s*realistic|photorealistic|cinematic\s*8k|8k|4k)\b/gi,
+      /\b(exactly\s*\d+\s*seconds?|vertical\s*9:16|horizontal\s*16:9|square\s*1:1|9:16|16:9|1:1|ultra\s*realistic|photorealistic|hyper\s*realistic|cinematic\s*8k|8k|4k|hdr|uhd)\b/gi,
       ' '
     )
     .replace(/[|–—]+/g, ' · ')
@@ -299,8 +310,88 @@ function cleanBrowserCaption(rawPrompt: string): string {
   return cleaned || 'OpenFrame Studio';
 }
 
+function extractBrowserDialogue(rawPrompt: string): string | null {
+  const m1 = rawPrompt.match(
+    /(?:exact(?:\s+urdu|\s+hindi)?\s*dialogue|speak\s+exactly(?:\s+this\s+dialogue)?|voiceover|narration|spoken\s+script)\s*[:：\-–]?[\s\S]{0,120}?["“«]([^"”»\n]{6,260})["”»]/i
+  );
+  if (m1?.[1]) return m1[1].trim();
+  const m2 = rawPrompt.match(/["“«]([^"”»]*[\u0600-\u06FF][^"”»]{4,240})["”»]/);
+  if (m2?.[1]) return m2[1].trim();
+  return null;
+}
+
+function splitBrowserDialogueCaptions(dialogue: string): [string, string, string] | null {
+  const clean = dialogue.trim();
+  if (!clean) return null;
+  const clauses = clean
+    .split(/[،,.؛;!?؟۔]+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length >= 3);
+  if (clauses.length >= 3) {
+    return [clauses[0].slice(0, 56), clauses[1].slice(0, 56), clauses.slice(2).join(' ').slice(0, 56)];
+  }
+  const words = clean.split(/\s+/);
+  if (words.length >= 6) {
+    const t1 = Math.ceil(words.length / 3);
+    const t2 = Math.ceil((words.length * 2) / 3);
+    return [
+      words.slice(0, t1).join(' ').slice(0, 56),
+      words.slice(t1, t2).join(' ').slice(0, 56),
+      words.slice(t2).join(' ').slice(0, 56),
+    ];
+  }
+  return [clean.slice(0, 56), clean.slice(0, 56), clean.slice(0, 56)];
+}
+
+function extractBrowserPromptBeats(rawPrompt: string): [string, string, string] {
+  const timeMatches = Array.from(
+    rawPrompt.matchAll(/\b\d+\s*[-–to]+\s*\d+\s*s(?:ec(?:onds?)?)?\s*[:：\-–]\s*([^\n|]+)/gi)
+  )
+    .map((m) => cleanBrowserCaption(m[1]))
+    .filter((s) => s.length >= 6);
+  if (timeMatches.length >= 3) return [timeMatches[0], timeMatches[1], timeMatches[2]];
+
+  const sceneMatches = Array.from(
+    rawPrompt.matchAll(/(?:scene|shot|clip|part|beat)\s*\d+\s*[:：\-–]\s*([^\n|]+)/gi)
+  )
+    .map((m) => cleanBrowserCaption(m[1]))
+    .filter((s) => s.length >= 4);
+  if (sceneMatches.length >= 3) return [sceneMatches[0], sceneMatches[1], sceneMatches[2]];
+
+  const lineParts = rawPrompt
+    .split(/\r?\n|\|/)
+    .map((s) => s.trim())
+    .filter((s) => !/^\d+\.\s*[^:]+:\s*$/.test(s))
+    .map((s) => cleanBrowserCaption(s))
+    .filter((s) => s.length >= 6);
+
+  if (lineParts.length >= 3) return [lineParts[0], lineParts[1], lineParts[2]];
+  if (lineParts.length === 2) return [lineParts[0], lineParts[1], `${lineParts[0]} · ${lineParts[1]}`];
+
+  const cleaned = cleanBrowserCaption(rawPrompt);
+  const clauses = cleaned
+    .split(/[.,;·!?،۔]+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length >= 4);
+
+  if (clauses.length >= 3) return [clauses[0], clauses[1], clauses[2]];
+  if (clauses.length === 2) return [clauses[0], clauses[1], cleaned];
+  return [cleaned, cleaned, cleaned];
+}
+
 function getBrowserPalette(theme: BrowserSceneTheme) {
   switch (theme) {
+    case 'garden':
+      return {
+        top: '#1e3a8a',
+        mid: '#f59e0b',
+        bottom: '#fde68a',
+        glow: '#fef08a',
+        accent: '#f59e0b',
+        silBack: '#15803d',
+        silMid: '#166534',
+        silFront: '#064e3b',
+      };
     case 'spiritual-twilight':
       return {
         top: '#060919',
@@ -345,6 +436,17 @@ function getBrowserPalette(theme: BrowserSceneTheme) {
         silMid: '#082219',
         silFront: '#04120d',
       };
+    case 'mountain':
+      return {
+        top: '#080e24',
+        mid: '#1e3a5f',
+        bottom: '#64748b',
+        glow: '#a5f3fc',
+        accent: '#38bdf8',
+        silBack: '#263850',
+        silMid: '#142033',
+        silFront: '#090f1c',
+      };
     case 'cyber':
       return {
         top: '#09091c',
@@ -367,6 +469,17 @@ function getBrowserPalette(theme: BrowserSceneTheme) {
         silMid: '#0e0c26',
         silFront: '#060514',
       };
+    case 'sunset':
+      return {
+        top: '#240b36',
+        mid: '#9a3412',
+        bottom: '#f59e0b',
+        glow: '#fef08a',
+        accent: '#fb7185',
+        silBack: '#4c1d24',
+        silMid: '#2a0f18',
+        silFront: '#14060b',
+      };
     default:
       return {
         top: '#0b132b',
@@ -383,6 +496,8 @@ function getBrowserPalette(theme: BrowserSceneTheme) {
 
 function getThemeChordFreqs(theme: BrowserSceneTheme): number[] {
   switch (theme) {
+    case 'garden':
+      return [174.61, 261.63, 349.23, 440.0];
     case 'spiritual-twilight':
       return [146.83, 220.0, 293.66, 349.23];
     case 'ocean':
@@ -441,10 +556,10 @@ async function renderBrowserVideo(
     }
   }
 
-  const theme = detectBrowserTheme(job.prompt);
-  const pal = getBrowserPalette(theme);
-  const cleanCaption = cleanBrowserCaption(job.prompt);
-  const isRtl = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/.test(cleanCaption);
+  const globalTheme = detectBrowserTheme(job.prompt);
+  const beats = extractBrowserPromptBeats(job.prompt);
+  const dialogue = extractBrowserDialogue(job.prompt);
+  const dialogueCaptions = dialogue ? splitBrowserDialogueCaptions(dialogue) : null;
 
   // Build real Web Audio API stereo soundscape track so exported WebM always includes audible audio
   let audioCtx: AudioContext | null = null;
@@ -470,7 +585,7 @@ async function renderBrowserVideo(
       masterGain.gain.exponentialRampToValueAtTime(0.001, now + playSec);
       masterGain.connect(dest);
 
-      const freqs = getThemeChordFreqs(theme);
+      const freqs = getThemeChordFreqs(globalTheme);
       freqs.forEach((f, idx) => {
         if (!audioCtx) return;
         const osc = audioCtx.createOscillator();
@@ -520,6 +635,7 @@ async function renderBrowserVideo(
     const w = canvas.width;
     const h = canvas.height;
     const minDim = Math.min(w, h);
+    const cx = w * 0.5;
     ctx.clearRect(0, 0, w, h);
 
     if (startImg && job.workflow === 'image-to-video') {
@@ -538,8 +654,60 @@ async function renderBrowserVideo(
       const scale = 1 + tNorm * 0.12;
       ctx.drawImage(refImgs[idx], (w - w * scale) / 2, (h - h * scale) / 2, w * scale, h * scale);
     } else {
-      // Multi-scene illustrated Canvas renderer
-      const sceneIdx = tNorm < 0.34 ? 0 : tNorm < 0.67 ? 1 : 2;
+      const sceneIdx: 0 | 1 | 2 = tNorm < 0.34 ? 0 : tNorm < 0.67 ? 1 : 2;
+      const sceneProgress =
+        sceneIdx === 0 ? tNorm / 0.34 : sceneIdx === 1 ? (tNorm - 0.34) / 0.33 : (tNorm - 0.67) / 0.33;
+
+      const beatPrompt = beats[sceneIdx];
+      const detectedBeatTheme = detectBrowserTheme(beatPrompt);
+      const effectiveTheme =
+        globalTheme === 'garden'
+          ? 'garden'
+          : detectedBeatTheme !== 'studio'
+          ? detectedBeatTheme
+          : globalTheme;
+      const pal = getBrowserPalette(effectiveTheme);
+      const textForObjects = beatPrompt.toLowerCase();
+
+      const hasDawnOrDay = /dawn|sunrise|morning|daylight|sunny|noon|طلوع|صبح|دن/.test(textForObjects);
+      const hasExplicitConcreteProp =
+        /clock|time|hourglass|book|grave|cemetery|car|vehicle|boat|ship|house|cabin|candle|fire|وقت|گھڑی|کتاب|قبر|کار|گاڑی|کشتی|گھر|شمع/.test(
+          textForObjects
+        );
+      const hasNight =
+        !hasDawnOrDay &&
+        (/night|star|moon|twilight|آخرت|رات|چاند|ستارے|قبر|lantern|cosmos/.test(textForObjects) ||
+          effectiveTheme === 'spiritual-twilight' ||
+          effectiveTheme === 'cosmos' ||
+          effectiveTheme === 'cyber');
+      const hasRain = /rain|storm|thunder|بارش|طوفان/.test(textForObjects);
+      const hasClouds = /cloud|fog|mist|storm|بادل|دھند/.test(textForObjects);
+      const hasMosque =
+        /mosque|masjid|dome|minaret|مسجد|نماز/.test(textForObjects) ||
+        (!hasExplicitConcreteProp && effectiveTheme === 'spiritual-twilight' && sceneIdx === 0);
+      const hasLantern =
+        /lantern|lamp|fanous|فانوس|چراغ/.test(textForObjects) ||
+        (!hasExplicitConcreteProp && effectiveTheme === 'spiritual-twilight' && sceneIdx === 1);
+      const hasCandleOrFire = /candle|fire|flame|lava|شمع|آگ/.test(textForObjects);
+      const hasClock = /clock|time|hour|hourglass|seconds|وقت|گھڑی/.test(textForObjects);
+      const hasBook = /book|quran|read|pages|کتاب|قرآن/.test(textForObjects);
+      const hasTraveler =
+        /man|woman|boy|girl|person|traveler|human|prayer|praying|dua|انسان|آدمی|لڑکا|مسافر|دعا/.test(
+          textForObjects
+        );
+      const hasGrave = /grave|cemetery|tomb|قبر|قبرستان/.test(textForObjects);
+      const hasCar = /car|vehicle|highway|drive|drifting|کار|گاڑی|سڑک/.test(textForObjects);
+      const hasBoat = /boat|ship|sail|کشتی|جہاز/.test(textForObjects);
+      const hasBirds = /bird|birds|eagle|dove|seagull|پرندے/.test(textForObjects);
+      const hasHouse = /house|home|cabin|cottage|گھر|مکان/.test(textForObjects);
+      const hasTrees =
+        /tree|forest|pine|jungle|garden|leaf|درخت|جنگل|باغ/.test(textForObjects) || effectiveTheme === 'forest';
+      const hasWater =
+        /ocean|sea|water|river|lake|wave|سمندر|دریا|پانی/.test(textForObjects) ||
+        effectiveTheme === 'ocean' ||
+        (!hasExplicitConcreteProp && effectiveTheme === 'spiritual-twilight' && sceneIdx === 2);
+
+      // Sky gradient
       const grad = ctx.createLinearGradient(0, 0, 0, h);
       grad.addColorStop(0, pal.top);
       grad.addColorStop(0.55, pal.mid);
@@ -547,22 +715,23 @@ async function renderBrowserVideo(
       ctx.fillStyle = grad;
       ctx.fillRect(0, 0, w, h);
 
-      // Animated twinkling stars
-      for (let i = 0; i < 36; i++) {
-        const sx = (((job.seed * 19 + i * 137) % 96) / 100) * w;
-        const sy = (((job.seed * 31 + i * 89) % 58) / 100) * h;
-        const twinkle = 0.35 + 0.55 * Math.abs(Math.sin(tNorm * Math.PI * 2 + i));
-        ctx.fillStyle = pal.glow;
-        ctx.globalAlpha = twinkle;
-        ctx.beginPath();
-        ctx.arc(sx, sy, 1.4 + (i % 2), 0, Math.PI * 2);
-        ctx.fill();
+      // Stars when night/cosmos/cyber
+      if (hasNight) {
+        for (let i = 0; i < 48; i++) {
+          const sx = (((job.seed * 19 + sceneIdx * 11 + i * 137) % 96) / 100) * w;
+          const sy = (((job.seed * 31 + sceneIdx * 7 + i * 89) % 58) / 100) * h;
+          const twinkle = 0.35 + 0.55 * Math.abs(Math.sin(tNorm * Math.PI * 2 + i));
+          ctx.fillStyle = '#fef3c7';
+          ctx.globalAlpha = twinkle;
+          ctx.beginPath();
+          ctx.arc(sx, sy, 1.3 + (i % 2), 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.globalAlpha = 1;
       }
-      ctx.globalAlpha = 1;
 
       const horizonY = h * (sceneIdx === 1 ? 0.64 : 0.68);
-      const cx = w * 0.5;
-      const glowY = sceneIdx === 1 ? h * 0.44 : horizonY - minDim * 0.08;
+      const glowY = sceneIdx === 1 ? h * 0.42 : horizonY - minDim * 0.1;
       const rg = ctx.createRadialGradient(cx, glowY, 0, cx, glowY, minDim * 0.48);
       rg.addColorStop(0, pal.glow);
       rg.addColorStop(0.5, pal.accent + '44');
@@ -570,98 +739,505 @@ async function renderBrowserVideo(
       ctx.fillStyle = rg;
       ctx.fillRect(0, 0, w, h);
 
-      if (theme === 'spiritual-twilight') {
-        if (sceneIdx === 0) {
-          // Crescent moon + mosque domes silhouette
-          const mx = w * 0.68;
-          const my = h * 0.22;
-          const mr = minDim * 0.08;
-          ctx.fillStyle = '#fef3c7';
-          ctx.beginPath();
-          ctx.arc(mx, my, mr, 0, Math.PI * 2);
-          ctx.fill();
+      // Celestial body: Planet / Crescent / Sun
+      if (effectiveTheme === 'cosmos' || /planet|earth|space/.test(textForObjects)) {
+        const px = w * (sceneIdx === 1 ? 0.42 : 0.56);
+        const py = h * 0.36;
+        const pr = minDim * 0.13;
+        ctx.fillStyle = pal.bottom;
+        ctx.beginPath();
+        ctx.arc(px, py, pr, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.save();
+        ctx.translate(px, py);
+        ctx.rotate(-0.28);
+        ctx.strokeStyle = pal.glow;
+        ctx.lineWidth = 4;
+        ctx.globalAlpha = 0.72;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, pr * 2.1, pr * 0.4, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+        ctx.globalAlpha = 1;
+      } else if (
+        !hasDawnOrDay &&
+        (effectiveTheme === 'spiritual-twilight' || /crescent|moon|چاند/.test(textForObjects))
+      ) {
+        const mx = w * (sceneIdx === 0 ? 0.68 : 0.32);
+        const my = h * 0.22;
+        const mr = minDim * 0.08;
+        ctx.fillStyle = '#fef3c7';
+        ctx.beginPath();
+        ctx.arc(mx, my, mr, 0, Math.PI * 2);
+        ctx.fill();
+        if (!/full\s*moon/.test(textForObjects)) {
           ctx.fillStyle = pal.top;
           ctx.beginPath();
           ctx.arc(mx + mr * 0.34, my - mr * 0.24, mr * 0.88, 0, Math.PI * 2);
           ctx.fill();
-
-          ctx.fillStyle = pal.silFront;
-          const domeW = w * 0.42;
-          const domeTop = horizonY - minDim * 0.2;
-          ctx.beginPath();
-          ctx.moveTo(cx - domeW / 2, horizonY + 16);
-          ctx.quadraticCurveTo(cx, domeTop - minDim * 0.14, cx + domeW / 2, horizonY + 16);
-          ctx.fill();
-          ctx.fillRect(cx - domeW * 0.64, horizonY - minDim * 0.06, domeW * 1.28, h - horizonY + minDim * 0.08);
-          // Minarets
-          const minW = minDim * 0.036;
-          const minTop = horizonY - minDim * 0.32;
-          ctx.fillRect(cx - domeW * 0.66, minTop, minW, horizonY - minTop + 20);
-          ctx.fillRect(cx + domeW * 0.66 - minW, minTop, minW, horizonY - minTop + 20);
-        } else if (sceneIdx === 1) {
-          // Glowing hanging lantern
-          const lx = cx;
-          const ly = h * 0.43 + Math.sin(tNorm * Math.PI * 2) * 6;
-          const ls = minDim * 0.13;
-          ctx.strokeStyle = pal.accent;
-          ctx.lineWidth = 4;
-          ctx.beginPath();
-          ctx.moveTo(lx, 0);
-          ctx.lineTo(lx, ly - ls * 0.45);
-          ctx.stroke();
-          ctx.fillStyle = pal.glow;
-          ctx.fillRect(lx - ls * 0.48, ly - ls * 0.45, ls * 0.96, ls * 1.1);
-          ctx.strokeRect(lx - ls * 0.48, ly - ls * 0.45, ls * 0.96, ls * 1.1);
-        } else {
-          // Golden dawn over reflective water
-          ctx.fillStyle = '#fef3c7';
-          ctx.beginPath();
-          ctx.arc(cx, horizonY - minDim * 0.04, minDim * 0.11, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.fillStyle = pal.silMid;
-          ctx.fillRect(0, horizonY, w, h - horizonY);
-          ctx.fillStyle = pal.accent + '66';
-          ctx.fillRect(cx - minDim * 0.18, horizonY + 24, minDim * 0.36, 8);
-          ctx.fillRect(cx - minDim * 0.11, horizonY + 52, minDim * 0.22, 6);
         }
       } else {
-        // Layered horizon & silhouettes for ocean, desert, forest, cyber, cosmos, studio
+        const sx = w * (0.42 + sceneProgress * 0.16);
+        const sy = horizonY - minDim * 0.12;
         ctx.fillStyle = pal.glow;
-        ctx.globalAlpha = 0.85;
+        ctx.globalAlpha = 0.9;
         ctx.beginPath();
-        ctx.arc(w * (0.4 + tNorm * 0.2), horizonY - minDim * 0.12, minDim * 0.09, 0, Math.PI * 2);
+        ctx.arc(sx, sy, minDim * 0.1, 0, Math.PI * 2);
         ctx.fill();
         ctx.globalAlpha = 1;
+      }
 
+      // Drifting clouds
+      if (hasClouds) {
+        ctx.fillStyle = 'rgba(203, 213, 225, 0.22)';
+        const drift = sceneProgress * 28;
+        ctx.beginPath();
+        ctx.ellipse(w * 0.28 + drift, h * 0.24, minDim * 0.18, minDim * 0.06, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(w * 0.72 - drift * 0.7, h * 0.28, minDim * 0.21, minDim * 0.065, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Landscape layer
+      if (effectiveTheme === 'cyber') {
+        const cols = 10;
+        const bw = Math.ceil(w / cols);
+        for (let i = 0; i < cols; i++) {
+          const bh = h * (0.25 + (((job.seed + i * 37 + sceneIdx * 13) % 38) / 100));
+          const bx = i * bw;
+          const by = h - bh;
+          ctx.fillStyle = pal.silFront;
+          ctx.fillRect(bx, by, bw - 4, bh);
+          ctx.fillStyle = i % 2 === 0 ? pal.glow : pal.accent;
+          ctx.globalAlpha = 0.82;
+          ctx.fillRect(bx + 8, by + 18, Math.max(6, bw - 22), 5);
+          ctx.globalAlpha = 1;
+        }
+      } else if (effectiveTheme === 'desert') {
         ctx.fillStyle = pal.silBack;
         ctx.beginPath();
-        ctx.moveTo(0, horizonY + 30);
-        ctx.lineTo(w * 0.25, horizonY - 70);
-        ctx.lineTo(w * 0.55, horizonY + 20);
-        ctx.lineTo(w * 0.8, horizonY - 85);
-        ctx.lineTo(w, horizonY + 15);
+        ctx.moveTo(0, horizonY);
+        ctx.quadraticCurveTo(w * 0.35, horizonY - 70, w, horizonY + 10);
         ctx.lineTo(w, h);
         ctx.lineTo(0, h);
         ctx.closePath();
         ctx.fill();
 
         ctx.fillStyle = pal.silFront;
-        ctx.fillRect(0, horizonY + 45, w, h - horizonY);
+        ctx.beginPath();
+        ctx.moveTo(0, horizonY + 45);
+        ctx.quadraticCurveTo(w * 0.65, horizonY - 35, w, horizonY + 55);
+        ctx.lineTo(w, h);
+        ctx.lineTo(0, h);
+        ctx.closePath();
+        ctx.fill();
+      } else if (hasWater) {
+        ctx.fillStyle = pal.silMid;
+        ctx.beginPath();
+        ctx.moveTo(0, horizonY);
+        ctx.quadraticCurveTo(w * 0.25, horizonY - 18 + Math.sin(tNorm * 8) * 6, w * 0.5, horizonY);
+        ctx.quadraticCurveTo(w * 0.75, horizonY + 18 - Math.sin(tNorm * 8) * 6, w, horizonY);
+        ctx.lineTo(w, h);
+        ctx.lineTo(0, h);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = pal.accent + '66';
+        ctx.fillRect(cx - minDim * 0.18, horizonY + 24, minDim * 0.36, 7);
+        ctx.fillRect(cx - minDim * 0.11, horizonY + 52, minDim * 0.22, 5);
+      } else {
+        ctx.fillStyle = pal.silBack;
+        ctx.beginPath();
+        ctx.moveTo(0, horizonY + 30);
+        ctx.lineTo(w * 0.24, horizonY - 80);
+        ctx.lineTo(w * 0.5, horizonY + 22);
+        ctx.lineTo(w * 0.76, horizonY - 95);
+        ctx.lineTo(w, horizonY + 18);
+        ctx.lineTo(w, h);
+        ctx.lineTo(0, h);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = pal.silFront;
+        ctx.fillRect(0, horizonY + 24, w, h - horizonY);
       }
 
-      // Floating light motes
-      for (let i = 0; i < 16; i++) {
-        const px = (((job.seed * 23 + i * 113) % 92 + 4) / 100) * w;
-        const py = (((job.seed * 41 + i * 79) % 70 + 10) / 100) * h - tNorm * 28;
-        ctx.fillStyle = pal.glow;
-        ctx.globalAlpha = 0.32;
+      // Specific prompt objects
+      if (hasMosque) {
+        ctx.fillStyle = pal.silFront;
+        const domeW = w * 0.4;
+        const domeTop = horizonY - minDim * 0.2;
+        const minW = minDim * 0.036;
+        const minTop = horizonY - minDim * 0.32;
+        ctx.fillRect(cx - domeW * 0.66, minTop, minW, horizonY - minTop + 20);
+        ctx.fillRect(cx + domeW * 0.66 - minW, minTop, minW, horizonY - minTop + 20);
         ctx.beginPath();
-        ctx.arc(px, py, 2 + (i % 4), 0, Math.PI * 2);
+        ctx.moveTo(cx - domeW / 2, horizonY + 16);
+        ctx.quadraticCurveTo(cx, domeTop - minDim * 0.14, cx + domeW / 2, horizonY + 16);
+        ctx.fill();
+        ctx.fillRect(cx - domeW * 0.62, horizonY - minDim * 0.06, domeW * 1.24, h - horizonY + minDim * 0.08);
+        ctx.fillStyle = pal.accent;
+        ctx.fillRect(cx - 14, horizonY - 38, 28, 30);
+      }
+
+      if (hasLantern) {
+        const lx = cx;
+        const ly = h * 0.43 + Math.sin(tNorm * Math.PI * 2) * 6;
+        const ls = minDim * 0.13;
+        ctx.strokeStyle = pal.accent;
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(lx, 0);
+        ctx.lineTo(lx, ly - ls * 0.45);
+        ctx.stroke();
+        ctx.fillStyle = pal.glow;
+        ctx.fillRect(lx - ls * 0.48, ly - ls * 0.45, ls * 0.96, ls * 1.1);
+        ctx.strokeRect(lx - ls * 0.48, ly - ls * 0.45, ls * 0.96, ls * 1.1);
+      }
+
+      if (hasCandleOrFire) {
+        const fx = cx;
+        const fy = horizonY - 12;
+        ctx.fillStyle = '#fef3c7';
+        ctx.fillRect(fx - 14, fy - 45, 28, 65);
+        const flicker = Math.sin(tNorm * 24) * 5;
+        ctx.fillStyle = '#fb923c';
+        ctx.beginPath();
+        ctx.moveTo(fx, fy - 95 + flicker);
+        ctx.quadraticCurveTo(fx + 22, fy - 62, fx, fy - 46);
+        ctx.quadraticCurveTo(fx - 22, fy - 62, fx, fy - 95 + flicker);
         ctx.fill();
       }
-      ctx.globalAlpha = 1;
 
-      // Frosted-glass bottom caption card showing clean prompt text
+      if (hasClock) {
+        const kx = cx;
+        const ky = h * 0.44;
+        const kr = minDim * 0.14;
+        ctx.fillStyle = 'rgba(2, 6, 23, 0.72)';
+        ctx.strokeStyle = pal.accent;
+        ctx.lineWidth = 5;
+        ctx.beginPath();
+        ctx.arc(kx, ky, kr, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        const angle = tNorm * Math.PI * 2 - Math.PI / 2;
+        ctx.strokeStyle = '#fef3c7';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(kx, ky);
+        ctx.lineTo(kx + Math.cos(angle) * kr * 0.65, ky + Math.sin(angle) * kr * 0.65);
+        ctx.stroke();
+      }
+
+      if (hasBook) {
+        const bx = cx;
+        const by = horizonY - 18;
+        const bw = minDim * 0.34;
+        ctx.fillStyle = '#fef3c7';
+        ctx.strokeStyle = pal.accent;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(bx, by);
+        ctx.quadraticCurveTo(bx - bw * 0.5, by - 28, bx - bw, by - 8);
+        ctx.lineTo(bx - bw, by + 38);
+        ctx.quadraticCurveTo(bx - bw * 0.5, by + 18, bx, by + 44);
+        ctx.quadraticCurveTo(bx + bw * 0.5, by + 18, bx + bw, by + 38);
+        ctx.lineTo(bx + bw, by - 8);
+        ctx.quadraticCurveTo(bx + bw * 0.5, by - 28, bx, by);
+        ctx.fill();
+        ctx.stroke();
+      }
+
+      if (hasGrave) {
+        for (const gxOff of [-0.22, 0.04, 0.24]) {
+          const gx = cx + w * gxOff;
+          ctx.fillStyle = pal.silMid;
+          ctx.fillRect(gx - 18, horizonY - 22, 36, 62);
+          ctx.beginPath();
+          ctx.arc(gx, horizonY - 22, 18, Math.PI, 0);
+          ctx.fill();
+        }
+      }
+
+      if (hasHouse) {
+        const hx = w * 0.26;
+        const hy = horizonY;
+        ctx.fillStyle = pal.silFront;
+        ctx.fillRect(hx - 45, hy - 55, 90, 65);
+        ctx.fillStyle = pal.silMid;
+        ctx.beginPath();
+        ctx.moveTo(hx - 58, hy - 55);
+        ctx.lineTo(hx, hy - 102);
+        ctx.lineTo(hx + 58, hy - 55);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = pal.accent;
+        ctx.fillRect(hx - 14, hy - 36, 24, 22);
+      }
+
+      if (hasTrees) {
+        ctx.fillStyle = pal.silFront;
+        for (const txOff of [0.12, 0.2, 0.82, 0.9]) {
+          const tx = w * txOff;
+          ctx.beginPath();
+          ctx.moveTo(tx, horizonY - 95);
+          ctx.lineTo(tx - 28, horizonY + 12);
+          ctx.lineTo(tx + 28, horizonY + 12);
+          ctx.closePath();
+          ctx.fill();
+        }
+      }
+
+      if (hasCar) {
+        const rx = cx + (sceneProgress - 0.5) * 40;
+        const ry = horizonY + 36;
+        ctx.fillStyle = '#1e293b';
+        ctx.beginPath();
+        ctx.moveTo(cx - 60, ry - 18);
+        ctx.lineTo(cx + 60, ry - 18);
+        ctx.lineTo(cx + 180, h);
+        ctx.lineTo(cx - 180, h);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = '#ef4444';
+        ctx.fillRect(rx - 44, ry - 32, 88, 26);
+        ctx.fillStyle = '#0f172a';
+        ctx.beginPath();
+        ctx.arc(rx - 28, ry - 6, 9, 0, Math.PI * 2);
+        ctx.arc(rx + 28, ry - 6, 9, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      if (hasBoat) {
+        const bx = w * (0.42 + sceneProgress * 0.16);
+        const by = horizonY + 24;
+        ctx.fillStyle = pal.silFront;
+        ctx.beginPath();
+        ctx.moveTo(bx - 55, by);
+        ctx.lineTo(bx + 55, by);
+        ctx.lineTo(bx + 36, by + 24);
+        ctx.lineTo(bx - 36, by + 24);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = '#fef3c7';
+        ctx.beginPath();
+        ctx.moveTo(bx, by - 72);
+        ctx.lineTo(bx, by - 4);
+        ctx.lineTo(bx + 40, by - 4);
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      if (hasTraveler) {
+        const px = w * (hasMosque ? 0.24 : 0.5);
+        const py = horizonY + 26;
+        ctx.fillStyle = pal.silFront;
+        ctx.beginPath();
+        ctx.arc(px, py - 56, 14, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(px - 18, py);
+        ctx.lineTo(px - 12, py - 40);
+        ctx.lineTo(px + 12, py - 40);
+        ctx.lineTo(px + 18, py);
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      if (hasBirds) {
+        ctx.strokeStyle = pal.glow;
+        ctx.lineWidth = 2.5;
+        for (let i = 0; i < 5; i++) {
+          const bx = w * (0.22 + i * 0.12) + sceneProgress * 22;
+          const by = h * (0.22 + (i % 2) * 0.05) + Math.sin(tNorm * 10 + i) * 4;
+          ctx.beginPath();
+          ctx.moveTo(bx - 12, by);
+          ctx.quadraticCurveTo(bx - 6, by - 8, bx, by);
+          ctx.quadraticCurveTo(bx + 6, by - 8, bx + 12, by);
+          ctx.stroke();
+        }
+      }
+
+      // Rain streaks or floating dust motes
+      if (hasRain) {
+        ctx.strokeStyle = 'rgba(186, 230, 253, 0.5)';
+        ctx.lineWidth = 2;
+        for (let i = 0; i < 36; i++) {
+          const rx = (((job.seed * 29 + i * 97) % 98) / 100) * w;
+          const ry = ((((job.seed * 17 + i * 67) % 85) / 100) * h + tNorm * 160) % h;
+          ctx.beginPath();
+          ctx.moveTo(rx, ry);
+          ctx.lineTo(rx - 10, ry + 34);
+          ctx.stroke();
+        }
+      } else {
+        for (let i = 0; i < 16; i++) {
+          const px = (((job.seed * 23 + i * 113) % 92 + 4) / 100) * w;
+          const py = (((job.seed * 41 + i * 79) % 70 + 10) / 100) * h - tNorm * 28;
+          ctx.fillStyle = pal.glow;
+          ctx.globalAlpha = 0.32;
+          ctx.beginPath();
+          ctx.arc(px, py, 2 + (i % 4), 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+      }
+
+      // Garden + exotic bird dedicated composition when prompt requests garden/flowers/bird/stream
+      if (effectiveTheme === 'garden') {
+        const gGrad = ctx.createLinearGradient(0, 0, 0, h);
+        gGrad.addColorStop(0, pal.top);
+        gGrad.addColorStop(0.55, pal.mid);
+        gGrad.addColorStop(1, pal.bottom);
+        ctx.fillStyle = gGrad;
+        ctx.fillRect(0, 0, w, h);
+
+        const gHorizon = h * 0.62;
+        const sunX = w * (sceneIdx === 1 ? 0.72 : 0.5);
+        const sunY = gHorizon - minDim * 0.14;
+        ctx.fillStyle = '#fef9c3';
+        ctx.beginPath();
+        ctx.arc(sunX, sunY, minDim * 0.13, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Meadow hills + crystal-clear stream
+        ctx.fillStyle = '#15803d';
+        ctx.beginPath();
+        ctx.moveTo(0, gHorizon + 12);
+        ctx.quadraticCurveTo(w * 0.3, gHorizon - 40, w, gHorizon + 8);
+        ctx.lineTo(w, h);
+        ctx.lineTo(0, h);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = '#166534';
+        ctx.beginPath();
+        ctx.moveTo(0, gHorizon + 45);
+        ctx.quadraticCurveTo(w * 0.65, gHorizon + 10, w, gHorizon + 48);
+        ctx.lineTo(w, h);
+        ctx.lineTo(0, h);
+        ctx.closePath();
+        ctx.fill();
+
+        if (sceneIdx !== 1) {
+          ctx.fillStyle = 'rgba(56, 189, 248, 0.85)';
+          ctx.beginPath();
+          ctx.moveTo(w * 0.42, gHorizon + 16);
+          ctx.quadraticCurveTo(w * 0.62, gHorizon + 95, w * 0.35, h);
+          ctx.lineTo(w * 0.68, h);
+          ctx.quadraticCurveTo(w * 0.8, gHorizon + 95, w * 0.52, gHorizon + 16);
+          ctx.closePath();
+          ctx.fill();
+        }
+
+        // Flowering tree branch
+        const branchY = sceneIdx === 1 ? h * 0.56 : h * 0.44;
+        ctx.strokeStyle = '#57341a';
+        ctx.lineWidth = minDim * 0.04;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(0, branchY + 55);
+        ctx.quadraticCurveTo(w * 0.38, branchY - 10, w * 0.86, branchY + 18);
+        ctx.stroke();
+
+        // Blossoms
+        [0.16, 0.28, 0.42, 0.64, 0.78, 0.86].forEach((px, idx) => {
+          const bx = w * px;
+          const by = branchY + (idx % 2 === 0 ? -18 : 14);
+          const r = minDim * (sceneIdx === 1 ? 0.042 : 0.032);
+          ctx.fillStyle = idx % 2 === 0 ? '#fbcfe8' : '#ffffff';
+          ctx.beginPath();
+          ctx.arc(bx, by, r, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#facc15';
+          ctx.beginPath();
+          ctx.arc(bx, by, r * 0.36, 0, Math.PI * 2);
+          ctx.fill();
+        });
+
+        // Garden flowers
+        const flowerColors = ['#ffffff', '#f472b6', '#a855f7', '#fb7185', '#fef08a', '#c084fc'];
+        for (let i = 0; i < 12; i++) {
+          const fx = (((job.seed * 13 + i * 71) % 90) + 5) * (w / 100);
+          const fy = gHorizon + 55 + ((i * 29) % Math.max(40, h * 0.22));
+          const fr = minDim * 0.024;
+          ctx.strokeStyle = '#14532d';
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.moveTo(fx, fy);
+          ctx.lineTo(fx, fy + 24);
+          ctx.stroke();
+          ctx.fillStyle = flowerColors[i % flowerColors.length];
+          ctx.beginPath();
+          ctx.arc(fx, fy, fr, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        // Exotic Turquoise/Violet/Gold Bird on the branch
+        const bs = sceneIdx === 1 ? minDim / 300 : minDim / 520;
+        const bx = w * 0.5;
+        const by = branchY - 12 * bs;
+        ctx.fillStyle = '#6d28d9';
+        ctx.beginPath();
+        ctx.moveTo(bx - 16 * bs, by + 16 * bs);
+        ctx.lineTo(bx - 52 * bs, by + 64 * bs);
+        ctx.lineTo(bx - 22 * bs, by + 58 * bs);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = '#06b6d4';
+        ctx.beginPath();
+        ctx.ellipse(bx, by + 12 * bs, 28 * bs, 38 * bs, -0.2, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#facc15';
+        ctx.beginPath();
+        ctx.ellipse(bx + 9 * bs, by + 16 * bs, 16 * bs, 26 * bs, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#7c3aed';
+        ctx.beginPath();
+        ctx.ellipse(bx - 12 * bs, by + 16 * bs, 14 * bs, 24 * bs, 0.2, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#0891b2';
+        ctx.beginPath();
+        ctx.arc(bx + 6 * bs, by - 26 * bs, 21 * bs, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#0f172a';
+        ctx.beginPath();
+        ctx.arc(bx + 13 * bs, by - 29 * bs, 6 * bs, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(bx + 15 * bs, by - 31 * bs, 2 * bs, 0, Math.PI * 2);
+        ctx.fill();
+
+        const beakOpen = sceneIdx === 1 && Math.sin(tNorm * 35) > 0;
+        ctx.fillStyle = '#f97316';
+        ctx.beginPath();
+        ctx.moveTo(bx + 24 * bs, by - 29 * bs);
+        ctx.lineTo(bx + 44 * bs, by - (beakOpen ? 27 : 23) * bs);
+        ctx.lineTo(bx + 24 * bs, by - (beakOpen ? 21 : 17) * bs);
+        ctx.closePath();
+        ctx.fill();
+
+        // Butterflies
+        [
+          { x: w * 0.22 + Math.sin(tNorm * 10) * 18, y: h * 0.32, c: '#f472b6' },
+          { x: w * 0.78 - Math.cos(tNorm * 9) * 16, y: h * 0.28, c: '#38bdf8' },
+        ].forEach((bt) => {
+          ctx.fillStyle = bt.c;
+          ctx.beginPath();
+          ctx.ellipse(bt.x - 7, bt.y, 8, 5, 0, 0, Math.PI * 2);
+          ctx.ellipse(bt.x + 7, bt.y, 8, 5, 0, 0, Math.PI * 2);
+          ctx.fill();
+        });
+      }
+
+      // Frosted-glass bottom caption card matching the current scene beat or exact dialogue
+      const caption = dialogueCaptions?.[sceneIdx] || beatPrompt || cleanBrowserCaption(job.prompt);
+      const isRtl = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/.test(caption);
       const boxW = w * 0.86;
       const boxH = minDim * 0.15;
       const boxX = (w - boxW) / 2;
@@ -680,7 +1256,7 @@ async function renderBrowserVideo(
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.direction = isRtl ? 'rtl' : 'ltr';
-      const label = cleanCaption.length > 48 ? `${cleanCaption.slice(0, 45).trim()}...` : cleanCaption;
+      const label = caption.length > 52 ? `${caption.slice(0, 49).trim()}...` : caption;
       ctx.fillText(label, cx, boxY + boxH / 2, boxW - 28);
       ctx.direction = 'ltr';
     }
@@ -991,7 +1567,7 @@ class BrowserStaticRuntime {
           );
         }
 
-        const cacheKey = `v2:${job.workflow}:${job.prompt}:${job.modelId}:${job.resolution}:${job.aspectRatio}:${job.durationSec}:${job.seed}`;
+        const cacheKey = `v4:${job.workflow}:${job.prompt}:${job.modelId}:${job.resolution}:${job.aspectRatio}:${job.durationSec}:${job.seed}`;
         const cached = this.state.config.cacheEnabled && job.useCache ? this.cacheUrls.get(cacheKey) : undefined;
         if (cached) {
           this.videoUrls.set(job.id, cached.url);

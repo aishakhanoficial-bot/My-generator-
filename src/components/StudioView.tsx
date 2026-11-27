@@ -953,7 +953,9 @@ export function StudioView({
           <div className="flex flex-wrap items-center justify-between gap-4 pt-2 border-t border-slate-200 dark:border-slate-800">
             <div className="text-xs text-slate-500 dark:text-slate-400">
               {activeModel?.provider === 'self-hosted' ? (
-                <span>No credits or tokens required · Executes on configured self-hosted backend</span>
+                <span>
+                  No credits or tokens required · Renders prompt storyboard + audio locally (connect Remote GPU Node in Admin for full AI diffusion)
+                </span>
               ) : (
                 <span className="text-amber-600 dark:text-amber-400">
                   External provider selected · Approval dialog opens before submission

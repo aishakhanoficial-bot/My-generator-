@@ -73,7 +73,7 @@ export function computeCacheKey(job: VideoJob, assets?: JobInputAssets): string 
     .createHash('sha256')
     .update(
       JSON.stringify({
-        version: 'v2-av-scenes',
+        version: 'v4-prompt-matched',
         workflow: job.workflow,
         prompt: job.prompt.trim(),
         negativePrompt: (job.negativePrompt ?? '').trim(),
@@ -577,6 +577,8 @@ export async function executeVideoJob(
     const { storyboard, voiceWavPath } = await planStoryboardAndVoiceover({
       prompt: job.prompt,
       durationSec: job.durationSec,
+      width,
+      height,
       jobId: job.id,
       voiceOutPath: geminiVoiceOut || path.join(UPLOADS_DIR, `${job.id}_gemini_voice.wav`),
       allowGemini,
@@ -803,10 +805,12 @@ export async function executeVideoJob(
           width,
           height,
           caption: storyboard.sceneCaptions[idx],
+          beatPrompt: storyboard.sceneBeats[idx],
+          objectTags: storyboard.sceneObjectTags?.[idx],
+          fullPrompt: job.prompt,
           seed: job.seed,
         });
         fs.writeFileSync(svgPath, svgMarkup, 'utf8');
-
         await runFfmpeg(['-y', '-i', svgPath, '-frames:v', '1', pngPath], undefined, undefined, abortSignal);
         scenePngs.push(pngPath);
       }

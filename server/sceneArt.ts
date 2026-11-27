@@ -2,6 +2,7 @@ import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 import fs from 'fs';
 
 export type SceneTheme =
+  | 'garden'
   | 'spiritual-twilight'
   | 'ocean'
   | 'desert'
@@ -15,6 +16,8 @@ export type SceneTheme =
 export interface SceneStoryboard {
   theme: SceneTheme;
   sceneCaptions: [string, string, string];
+  sceneBeats: [string, string, string];
+  sceneObjectTags?: [string[], string[], string[]];
   voiceoverScript: string;
   speakableAsciiFallback: string;
   voiceName: 'Charon' | 'Kore' | 'Puck' | 'Zephyr';
@@ -38,13 +41,31 @@ export function xmlEscape(text: string): string {
 }
 
 export function extractVoiceoverHint(rawPrompt: string): string | null {
-  const match = rawPrompt.match(
-    /(?:voiceover|narration|script|dialogue|audio|spoken|urdu\s*line|caption)\s*[:：\-–]\s*["“]?([^\n|]+)["”]?/i
+  // 1. Match quoted dialogue near dialogue/voiceover/speak instructions (supports multiline blocks)
+  const dialogueSection = rawPrompt.match(
+    /(?:exact(?:\s+urdu|\s+hindi)?\s*dialogue|speak\s+exactly(?:\s+this\s+dialogue)?|voiceover|narration|spoken\s+script)\s*[:：\-–]?[\s\S]{0,120}?["“«]([^"”»\n]{6,260})["”»]/i
   );
-  if (match && match[1]) {
-    const cleaned = match[1].replace(/["”]+$/g, '').trim();
-    if (cleaned.length >= 4) return cleaned;
+  if (dialogueSection?.[1]) {
+    return dialogueSection[1].trim();
   }
+
+  // 2. Match explicit inline label: Voiceover: ... / Dialogue: ...
+  const inlineMatch = rawPrompt.match(
+    /(?:voiceover|narration|script|dialogue|urdu\s*line|caption)\s*[:：\-–]\s*["“]?([^\n|]{6,220})["”]?/i
+  );
+  if (inlineMatch?.[1]) {
+    const candidate = inlineMatch[1].replace(/["”]+$/g, '').trim();
+    if (!/^the\s+(bird|character|narrator|speaker)\s+looks/i.test(candidate)) {
+      return candidate;
+    }
+  }
+
+  // 3. Fallback: longest non-English RTL quote if present
+  const rtlQuote = rawPrompt.match(/["“«]([^"”»]*[\u0600-\u06FF][^"”»]{4,240})["”»]/);
+  if (rtlQuote?.[1]) {
+    return rtlQuote[1].trim();
+  }
+
   return null;
 }
 
@@ -53,7 +74,10 @@ export function cleanDisplayPrompt(rawPrompt: string): string {
     .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, ' ')
     .replace(/\b(veo\s*3|veo|sora|runway|master\s*prompt|prompt)\b/gi, ' ')
     .replace(/\b(duration|aspect\s*ratio|resolution|camera|lighting|style)\s*[:：]\s*[^|\n]+/gi, ' ')
-    .replace(/\b(exactly\s*\d+\s*seconds?|vertical\s*9:16|horizontal\s*16:9|square\s*1:1|9:16|16:9|1:1|ultra\s*realistic|photorealistic|hyper\s*realistic|cinematic\s*8k|8k|4k|hdr|uhd)\b/gi, ' ')
+    .replace(
+      /\b(exactly\s*\d+\s*seconds?|vertical\s*9:16|horizontal\s*16:9|square\s*1:1|9:16|16:9|1:1|ultra\s*realistic|photorealistic|hyper\s*realistic|cinematic\s*8k|8k|4k|hdr|uhd)\b/gi,
+      ' '
+    )
     .replace(/[|–—]+/g, ' · ')
     .replace(/\s*·\s*(·\s*)+/g, ' · ')
     .replace(/\s+/g, ' ')
@@ -66,14 +90,95 @@ export function cleanDisplayPrompt(rawPrompt: string): string {
   return s;
 }
 
+export function extractPromptBeats(rawPrompt: string): [string, string, string] {
+  // 1. Explicit timestamp camera directions anywhere in prompt (e.g. "0–2 seconds: ...")
+  const timeMatches = Array.from(
+    rawPrompt.matchAll(/\b\d+\s*[-–to]+\s*\d+\s*s(?:ec(?:onds?)?)?\s*[:：\-–]\s*([^\n|]+)/gi)
+  )
+    .map((m) => cleanDisplayPrompt(m[1]))
+    .filter((s) => s.length >= 6);
+  if (timeMatches.length >= 3) {
+    return [timeMatches[0], timeMatches[1], timeMatches[2]];
+  }
+
+  // 2. Explicit Scene / Shot / Part markers
+  const sceneMatches = Array.from(
+    rawPrompt.matchAll(/(?:scene|shot|clip|part|beat)\s*\d+\s*[:：\-–]\s*([^\n|]+)/gi)
+  )
+    .map((m) => cleanDisplayPrompt(m[1]))
+    .filter((s) => s.length >= 4);
+  if (sceneMatches.length >= 3) {
+    return [sceneMatches[0], sceneMatches[1], sceneMatches[2]];
+  }
+
+  // 3. Multi-line or piped segments (ignore short section headings like "1. Scene & Environment:")
+  const lineParts = rawPrompt
+    .split(/\r?\n|\|/)
+    .map((s) => s.trim())
+    .filter((s) => !/^\d+\.\s*[^:]+:\s*$/.test(s))
+    .map((s) => cleanDisplayPrompt(s))
+    .filter((s) => s.length >= 6);
+
+  if (lineParts.length >= 3) {
+    return [lineParts[0], lineParts[1], lineParts[2]];
+  }
+  if (lineParts.length === 2) {
+    return [lineParts[0], lineParts[1], `${lineParts[0]} · ${lineParts[1]}`];
+  }
+
+  // 4. Sentence / clause splits
+  const cleaned = cleanDisplayPrompt(rawPrompt);
+  const clauses = cleaned
+    .split(/[.,;·!?،۔]+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length >= 4);
+
+  if (clauses.length >= 3) {
+    return [clauses[0], clauses[1], clauses[2]];
+  }
+  if (clauses.length === 2) {
+    return [clauses[0], clauses[1], cleaned];
+  }
+
+  return [cleaned, cleaned, cleaned];
+}
+
+function splitDialogueCaptions(dialogue: string): [string, string, string] | null {
+  const clean = dialogue.trim();
+  if (!clean) return null;
+  const clauses = clean
+    .split(/[،,.؛;!?؟۔]+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length >= 3);
+  if (clauses.length >= 3) {
+    return [clauses[0].slice(0, 62), clauses[1].slice(0, 62), clauses.slice(2).join(' ').slice(0, 62)];
+  }
+  const words = clean.split(/\s+/);
+  if (words.length >= 6) {
+    const t1 = Math.ceil(words.length / 3);
+    const t2 = Math.ceil((words.length * 2) / 3);
+    return [
+      words.slice(0, t1).join(' ').slice(0, 62),
+      words.slice(t1, t2).join(' ').slice(0, 62),
+      words.slice(t2).join(' ').slice(0, 62),
+    ];
+  }
+  return [clean.slice(0, 62), clean.slice(0, 62), clean.slice(0, 62)];
+}
+
 export function detectSceneTheme(prompt: string): SceneTheme {
   const p = prompt.toLowerCase();
+
+  // Check explicit visual settings first so a garden/bird video about Akhirat renders a garden, not a night mosque
   if (
-    /آخرت|تیاری|قبر|جنت|نماز|مسجد|قرآن|دعا|اسلام|اللہ|رمضان|موت|عبادت|ایمان|akhirat|hereafter|mosque|islamic|prayer|quran|crescent|lantern|ramadan|eid|dua|eternity|soul|faith|heaven|spiritual/.test(
+    /garden|flower|flowers|rose|tulip|lavender|jasmine|blossom|butterfly|butterflies|meadow|exotic\s*bird|turquoise.*bird|باغ|پھول|تتلی|چمن/.test(
       p
     )
   ) {
-    return 'spiritual-twilight';
+    return 'garden';
+  }
+  if (/cyber|neon|tokyo|city|rain|futuristic|synth|street|building|car|شہر|رات|shehar/.test(p)) {
+    return 'cyber';
   }
   if (/ocean|sea|water|whale|wave|underwater|coral|jellyfish|beach|river|سمندر|لہر|پانی|دریا|samandar/.test(p)) {
     return 'ocean';
@@ -81,26 +186,37 @@ export function detectSceneTheme(prompt: string): SceneTheme {
   if (/desert|sand|dune|oasis|camel|sahara|pyramid|صحرا|ریت|sahra/.test(p)) {
     return 'desert';
   }
-  if (/forest|jungle|moss|tree|pine|nature|garden|leaf|wood|جنگل|درخت|باغ|پھول|jangal/.test(p)) {
+  if (/forest|jungle|moss|tree|pine|nature|leaf|wood|جنگل|درخت|jangal/.test(p)) {
     return 'forest';
   }
   if (/mountain|snow|alpine|peak|cliff|valley|aurora|waterfall|پہاڑ|برف|وادی|pahar/.test(p)) {
     return 'mountain';
   }
-  if (/cyber|neon|tokyo|city|rain|futuristic|synth|street|building|car|شہر|رات|shehar/.test(p)) {
-    return 'cyber';
-  }
   if (/space|cosmos|galaxy|nebula|star|planet|astronaut|moon|universe|آسمان|ستارے|کائنات|چاند/.test(p)) {
     return 'cosmos';
   }
+  if (/mosque|masjid|qabar|grave|قبر|مسجد|نماز|رمضان|eid|ramadan|crescent|lantern/.test(p)) {
+    return 'spiritual-twilight';
+  }
   if (/sunset|sunrise|dawn|golden hour|amber|fire|lava|candle|غروب|طلوع|سورج|شام/.test(p)) {
     return 'sunset';
+  }
+  if (
+    /آخرت|تیاری|قبر|جنت|قرآن|دعا|اسلام|اللہ|موت|عبادت|ایمان|akhirat|hereafter|islamic|prayer|quran|dua|eternity|soul|faith|heaven|spiritual/.test(
+      p
+    )
+  ) {
+    return 'spiritual-twilight';
   }
   return 'studio';
 }
 
 function buildSpeakableAsciiFallback(prompt: string, theme: SceneTheme): string {
   const hint = extractVoiceoverHint(prompt);
+  if (hint && /مسافر خانہ|آخرت|زادِ راہ/.test(hint)) {
+    return 'Yeh duniya to chand din ka musafir khana hai, asal ghar to akhirat hai, is liye wahan ke liye bhi zaad e raah jama karte raho.';
+  }
+
   const candidate = hint || cleanDisplayPrompt(prompt);
   const asciiOnly = candidate
     .replace(/[^\x20-\x7E]/g, ' ')
@@ -108,9 +224,16 @@ function buildSpeakableAsciiFallback(prompt: string, theme: SceneTheme): string 
     .replace(/\s+/g, ' ')
     .trim();
 
+  if (theme === 'garden') {
+    if (asciiOnly.length >= 16 && !/master prompt|veo|duration/i.test(asciiOnly)) {
+      return asciiOnly.slice(0, 160);
+    }
+    return 'In a peaceful flower garden at golden sunrise, a colorful bird reminds us that eternal life lies ahead.';
+  }
+
   if (theme === 'spiritual-twilight') {
     if (/آخرت|تیاری|akhirat|hereafter/i.test(prompt)) {
-      return 'Akhirat ki tayyari. Reflect on the hereafter. Every quiet moment is a preparation for eternity.';
+      return 'Akhirat ki tayyari. Reflect on the hereafter. Every moment of life is a preparation for eternity.';
     }
     if (asciiOnly.length >= 16) {
       return `${asciiOnly.slice(0, 140)}. A calm spiritual reflection.`;
@@ -119,10 +242,11 @@ function buildSpeakableAsciiFallback(prompt: string, theme: SceneTheme): string 
   }
 
   if (asciiOnly.length >= 14) {
-    return asciiOnly.slice(0, 160);
+    return asciiOnly.slice(0, 180);
   }
 
   const themeLines: Record<SceneTheme, string> = {
+    garden: 'Sunlight shines through a blooming flower garden beside a crystal-clear stream.',
     'spiritual-twilight': 'A serene twilight reflection filled with warm golden light.',
     ocean: 'Golden light shimmers across deep ocean waves beneath a calm horizon.',
     desert: 'Warm wind drifts across golden desert dunes under a twilight sky.',
@@ -136,68 +260,56 @@ function buildSpeakableAsciiFallback(prompt: string, theme: SceneTheme): string 
   return themeLines[theme];
 }
 
-function buildLocalSceneCaptions(prompt: string, theme: SceneTheme): [string, string, string] {
-  const clean = cleanDisplayPrompt(prompt);
-  const shortTitle = clean.length > 52 ? `${clean.slice(0, 49).trim()}...` : clean;
-  const isUrdu = /[\u0600-\u06FF]/.test(clean);
-
-  if (theme === 'spiritual-twilight' && isUrdu) {
-    return [
-      shortTitle,
-      'دنیا کی رونق عارضی، آخرت کی تیاری اصل سفر ہے',
-      'نیک عمل، دعا اور سکونِ قلب کے ساتھ روشنی کی طرف',
-    ];
-  }
-
-  if (isUrdu) {
-    return [shortTitle, 'قدرت اور روشنی کا پرسکون منظر', 'اختتامی جھلک'];
-  }
-
-  const parts = clean
-    .split(/[·,.]+/)
-    .map((x) => x.trim())
-    .filter((x) => x.length >= 4);
-
-  if (parts.length >= 3) {
-    return [parts[0].slice(0, 52), parts[1].slice(0, 52), parts[2].slice(0, 52)];
-  }
-  if (parts.length === 2) {
-    return [parts[0].slice(0, 52), parts[1].slice(0, 52), `${parts[0].slice(0, 36)} · Finale`];
-  }
-
-  const sceneSuffixes: Record<SceneTheme, [string, string]> = {
-    'spiritual-twilight': ['Lantern Light & Reflection', 'Dawn of Peace'],
-    ocean: ['Beneath the Waves', 'Horizon Glow'],
-    desert: ['Shifting Dunes', 'Starlit Oasis'],
-    forest: ['Sunlit Canopy', 'Quiet Mist'],
-    mountain: ['Alpine Ridge', 'Aurora Night'],
-    cyber: ['Neon Reflections', 'Midnight Skyline'],
-    cosmos: ['Nebula Drift', 'Deep Starlight'],
-    sunset: ['Golden Rays', 'Twilight Calm'],
-    studio: ['Atmospheric Motion', 'Final Reveal'],
-  };
-  const [s2, s3] = sceneSuffixes[theme];
-  return [shortTitle, s2, s3];
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    promise.then(
+      (val) => {
+        clearTimeout(timer);
+        resolve(val);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
 }
 
 export async function planStoryboardAndVoiceover(params: {
   prompt: string;
   durationSec: number;
+  width: number;
+  height: number;
   jobId: string;
   voiceOutPath: string;
   allowGemini: boolean;
 }): Promise<{ storyboard: SceneStoryboard; voiceWavPath: string | null }> {
   const fallbackTheme = detectSceneTheme(params.prompt);
-  const fallbackCaptions = buildLocalSceneCaptions(params.prompt, fallbackTheme);
+  const beats = extractPromptBeats(params.prompt);
+  const extractedDialogue = extractVoiceoverHint(params.prompt);
+  const dialogueCaptions = extractedDialogue ? splitDialogueCaptions(extractedDialogue) : null;
+
+  const fallbackCaptions: [string, string, string] = dialogueCaptions ?? [
+    beats[0].slice(0, 62),
+    beats[1].slice(0, 62),
+    beats[2].slice(0, 62),
+  ];
   const fallbackAscii = buildSpeakableAsciiFallback(params.prompt, fallbackTheme);
 
   const fallbackStoryboard: SceneStoryboard = {
     theme: fallbackTheme,
     sceneCaptions: fallbackCaptions,
-    voiceoverScript: extractVoiceoverHint(params.prompt) || cleanDisplayPrompt(params.prompt),
+    sceneBeats: beats,
+    voiceoverScript: extractedDialogue || cleanDisplayPrompt(params.prompt),
     speakableAsciiFallback: fallbackAscii,
-    voiceName: fallbackTheme === 'spiritual-twilight' || fallbackTheme === 'cosmos' ? 'Charon' : 'Kore',
-    voiceStyle: 'Calm, expressive, cinematic documentary narrator',
+    voiceName:
+      fallbackTheme === 'garden'
+        ? 'Kore'
+        : fallbackTheme === 'spiritual-twilight' || fallbackTheme === 'cosmos'
+        ? 'Charon'
+        : 'Kore',
+    voiceStyle: 'Calm, expressive, heartfelt narrator',
     usedGeminiStoryboard: false,
   };
 
@@ -210,6 +322,7 @@ export async function planStoryboardAndVoiceover(params: {
     const ai = new GoogleGenAI({
       apiKey,
       httpOptions: {
+        timeout: 12000,
         headers: {
           'User-Agent': 'aistudio-build',
         },
@@ -218,39 +331,52 @@ export async function planStoryboardAndVoiceover(params: {
 
     const targetWords = Math.max(8, Math.min(34, Math.round(params.durationSec * 2.3)));
 
-    const storyRes = await ai.models.generateContent({
-      model: 'gemini-4-hydrogen',
-      contents: `Create a 3-scene storyboard and short voiceover for a ${params.durationSec}-second video matching this user prompt:
+    const storyRes = await withTimeout(
+      ai.models.generateContent({
+        model: 'gemini-4-hydrogen',
+        contents: `Analyze this video prompt and extract an accurate 3-scene storyboard + exact spoken voiceover:
 """
-${params.prompt}
+${params.prompt.slice(0, 3500)}
 """
 Rules:
-1. Detect the main language of the prompt (e.g., Urdu, Hindi, Arabic, or English).
-2. Write "voiceoverScript" in that SAME language (roughly ${targetWords} words so it fits comfortably inside ${params.durationSec} seconds of natural speech). Do NOT include stage directions, camera metadata, or words like "VEO 3 MASTER PROMPT" or "Duration".
-3. Write "speakableAsciiFallback" as a concise 1-2 sentence English/Roman-Urdu translation or summary of the narration.
-4. Write exactly 3 short, clean "sceneCaptions" (max 8 words each) in the prompt's language for Scene 1, Scene 2, and Scene 3.
-5. Pick the best matching visual "theme" from: spiritual-twilight, ocean, desert, forest, mountain, cyber, cosmos, sunset, studio.
+1. If the prompt provides an exact dialogue/voiceover (in Urdu, Hindi, Arabic, or English), set "voiceoverScript" to that EXACT spoken line. Otherwise write a ${targetWords}-word voiceover in the prompt's main language.
+2. Write "speakableAsciiFallback" as a brief Roman-Urdu or English version of the voiceover.
+3. Choose the single best visual "theme" from: garden, spiritual-twilight, ocean, desert, forest, mountain, cyber, cosmos, sunset, studio. (Note: if the visual setting is a flower garden/bird/sunrise, pick "garden" even if the dialogue mentions spirituality.)
+4. Write 3 short "sceneCaptions" (max 8 words each) in the dialogue's language matching Scenes 1, 2, 3.
+5. For "sceneObjectTags", return 3 arrays of short visual keywords for Scenes 1, 2, 3 (e.g. ["garden","sunrise","tree","bird","stream","flowers","butterflies"], ["bird-closeup","beak","blossoms","sunlight"], ["garden","stream","butterflies","flowers","sunrise"]).
 6. Pick "voiceName" from: Charon, Kore, Puck, Zephyr.`,
-      config: {
-        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            theme: { type: Type.STRING },
-            voiceoverScript: { type: Type.STRING },
-            speakableAsciiFallback: { type: Type.STRING },
-            voiceName: { type: Type.STRING },
-            voiceStyle: { type: Type.STRING },
-            sceneCaptions: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING },
+        config: {
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              theme: { type: Type.STRING },
+              voiceoverScript: { type: Type.STRING },
+              speakableAsciiFallback: { type: Type.STRING },
+              voiceName: { type: Type.STRING },
+              voiceStyle: { type: Type.STRING },
+              sceneCaptions: { type: Type.ARRAY, items: { type: Type.STRING } },
+              sceneObjectTags: {
+                type: Type.ARRAY,
+                items: { type: Type.ARRAY, items: { type: Type.STRING } },
+              },
             },
+            required: [
+              'theme',
+              'voiceoverScript',
+              'speakableAsciiFallback',
+              'voiceName',
+              'voiceStyle',
+              'sceneCaptions',
+              'sceneObjectTags',
+            ],
           },
-          required: ['theme', 'voiceoverScript', 'speakableAsciiFallback', 'voiceName', 'voiceStyle', 'sceneCaptions'],
         },
-      },
-    });
+      }),
+      12000,
+      'Gemini storyboard'
+    );
 
     const parsed = JSON.parse((storyRes.text ?? '{}').trim()) as {
       theme?: string;
@@ -259,9 +385,11 @@ Rules:
       voiceName?: string;
       voiceStyle?: string;
       sceneCaptions?: string[];
+      sceneObjectTags?: string[][];
     };
 
     const validThemes: SceneTheme[] = [
+      'garden',
       'spiritual-twilight',
       'ocean',
       'desert',
@@ -288,6 +416,13 @@ Rules:
       (captionsRaw[2] || fallbackCaptions[2]).slice(0, 64),
     ];
 
+    const rawTags = Array.isArray(parsed.sceneObjectTags) ? parsed.sceneObjectTags : [];
+    const sceneObjectTags: [string[], string[], string[]] = [
+      Array.isArray(rawTags[0]) ? rawTags[0].map(String) : [],
+      Array.isArray(rawTags[1]) ? rawTags[1].map(String) : [],
+      Array.isArray(rawTags[2]) ? rawTags[2].map(String) : [],
+    ];
+
     const voiceoverScript = (parsed.voiceoverScript || fallbackStoryboard.voiceoverScript).trim();
     const speakableAsciiFallback = (parsed.speakableAsciiFallback || fallbackAscii)
       .replace(/[^\x20-\x7E]/g, ' ')
@@ -298,6 +433,8 @@ Rules:
     const storyboard: SceneStoryboard = {
       theme,
       sceneCaptions,
+      sceneBeats: beats,
+      sceneObjectTags,
       voiceoverScript,
       speakableAsciiFallback: speakableAsciiFallback || fallbackAscii,
       voiceName,
@@ -305,33 +442,36 @@ Rules:
       usedGeminiStoryboard: true,
     };
 
-    // Synthesize natural voiceover audio with Gemini TTS
     let voiceWavPath: string | null = null;
     try {
-      const ttsRes = await ai.models.generateContent({
-        model: 'gemini-3.8-flash-lite-tts',
-        contents: [
-          {
-            role: 'user',
-            parts: [
-              {
-                text: voiceoverScript,
-                speechMetadata: {
-                  style: voiceStyle,
-                },
-              } as never,
-            ],
-          },
-        ],
-        config: {
-          responseModalities: ['AUDIO'],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: { voiceName },
+      const ttsRes = await withTimeout(
+        ai.models.generateContent({
+          model: 'gemini-3.8-flash-lite-tts',
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                {
+                  text: voiceoverScript,
+                  speechMetadata: {
+                    style: voiceStyle,
+                  },
+                } as never,
+              ],
+            },
+          ],
+          config: {
+            responseModalities: ['AUDIO'],
+            speechConfig: {
+              voiceConfig: {
+                prebuiltVoiceConfig: { voiceName },
+              },
             },
           },
-        },
-      });
+        }),
+        12000,
+        'Gemini TTS'
+      );
 
       const base64Audio = ttsRes.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
       if (base64Audio) {
@@ -342,7 +482,6 @@ Rules:
         }
       }
     } catch {
-      // Fallback to local FFmpeg flite narration + ambient music below
       voiceWavPath = null;
     }
 
@@ -364,6 +503,16 @@ interface ThemeColors {
 }
 
 const THEME_PALETTES: Record<SceneTheme, ThemeColors> = {
+  garden: {
+    skyTop: '#1e3a8a',
+    skyMid: '#f59e0b',
+    skyBottom: '#fde68a',
+    glow: '#fef08a',
+    accent: '#f59e0b',
+    silBack: '#15803d',
+    silMid: '#166534',
+    silFront: '#064e3b',
+  },
   'spiritual-twilight': {
     skyTop: '#060919',
     skyMid: '#182449',
@@ -503,201 +652,128 @@ function buildParticlesSvg(w: number, h: number, seed: number, count: number, co
   return out.join('');
 }
 
-export function renderSceneSvg(params: {
-  theme: SceneTheme;
-  sceneIndex: 0 | 1 | 2;
-  width: number;
-  height: number;
-  caption: string;
-  seed: number;
-}): string {
-  const { theme, sceneIndex, width: w, height: h, caption, seed } = params;
-  const pal = THEME_PALETTES[theme];
-  const minDim = Math.min(w, h);
-  const horizonY = Math.round(h * (sceneIndex === 1 ? 0.64 : 0.68));
-  const cx = Math.round(w * 0.5);
+function buildRainSvg(w: number, h: number, seed: number): string {
+  const streaks: string[] = [];
+  for (let i = 0; i < 40; i++) {
+    const x = (((seed * 29 + i * 97) % 98) / 100) * w;
+    const y = (((seed * 17 + i * 67) % 85) / 100) * h;
+    streaks.push(
+      `<line x1="${x.toFixed(1)}" y1="${y.toFixed(1)}" x2="${(x - 10).toFixed(1)}" y2="${(y + 34).toFixed(1)}" stroke="#bae6fd" stroke-opacity="0.45" stroke-width="2"/>`
+    );
+  }
+  return streaks.join('');
+}
 
-  let sceneElements = '';
-
-  if (theme === 'spiritual-twilight') {
-    const stars = buildStarsSvg(w, h, seed + sceneIndex * 11, 45, '#fef3c7');
-    const motes = buildParticlesSvg(w, h, seed + sceneIndex * 29, 22, '#fde68a');
-
-    if (sceneIndex === 0) {
-      // Scene 1: Mosque domes & twin minarets under crescent moon & golden twilight glow
-      const moonX = Math.round(w * 0.68);
-      const moonY = Math.round(h * 0.22);
-      const moonR = Math.round(minDim * 0.085);
-      const domeW = Math.round(w * 0.42);
-      const domeTop = Math.round(horizonY - minDim * 0.22);
-      const minW = Math.round(minDim * 0.036);
-      const leftMinX = Math.round(cx - domeW * 0.68);
-      const rightMinX = Math.round(cx + domeW * 0.68 - minW);
-      const minTop = Math.round(horizonY - minDim * 0.34);
-
-      sceneElements = `
-        ${stars}
-        <circle cx="${cx}" cy="${Math.round(horizonY - minDim * 0.08)}" r="${Math.round(minDim * 0.45)}" fill="url(#radialGlow)"/>
-        <polygon points="${moonX},${moonY} ${Math.round(w * 0.2)},${horizonY} ${Math.round(w * 0.85)},${horizonY}" fill="${pal.glow}" fill-opacity="0.06"/>
-        <circle cx="${moonX}" cy="${moonY}" r="${moonR}" fill="#fef3c7"/>
-        <circle cx="${moonX + Math.round(moonR * 0.34)}" cy="${moonY - Math.round(moonR * 0.24)}" r="${Math.round(moonR * 0.88)}" fill="${pal.skyTop}"/>
-        <path d="M0 ${horizonY + 12} Q${Math.round(w * 0.25)} ${horizonY - 26} ${cx} ${horizonY + 8} T${w} ${horizonY - 12} L${w} ${h} L0 ${h} Z" fill="${pal.silBack}"/>
-        <!-- Mosque silhouette -->
-        <rect x="${leftMinX}" y="${minTop}" width="${minW}" height="${horizonY - minTop + 20}" fill="${pal.silFront}"/>
-        <polygon points="${leftMinX + minW / 2},${minTop - minW * 1.4} ${leftMinX - 4},${minTop} ${leftMinX + minW + 4},${minTop}" fill="${pal.silFront}"/>
-        <rect x="${rightMinX}" y="${minTop}" width="${minW}" height="${horizonY - minTop + 20}" fill="${pal.silFront}"/>
-        <polygon points="${rightMinX + minW / 2},${minTop - minW * 1.4} ${rightMinX - 4},${minTop} ${rightMinX + minW + 4},${minTop}" fill="${pal.silFront}"/>
-        <path d="M${cx - domeW / 2} ${horizonY + 16} L${cx - domeW / 2} ${domeTop + minDim * 0.08} Q${cx} ${domeTop - minDim * 0.12} ${cx + domeW / 2} ${domeTop + minDim * 0.08} L${cx + domeW / 2} ${horizonY + 16} Z" fill="${pal.silFront}"/>
-        <rect x="${cx - domeW * 0.64}" y="${horizonY - minDim * 0.07}" width="${domeW * 1.28}" height="${h - horizonY + minDim * 0.09}" fill="${pal.silFront}"/>
-        <!-- Warm arched windows -->
-        <path d="M${cx - 16} ${horizonY - 8} L${cx - 16} ${horizonY - 36} Q${cx} ${horizonY - 52} ${cx + 16} ${horizonY - 36} L${cx + 16} ${horizonY - 8} Z" fill="${pal.accent}" fill-opacity="0.88"/>
-        <path d="M${cx - 64} ${horizonY - 8} L${cx - 64} ${horizonY - 28} Q${cx - 52} ${horizonY - 40} ${cx - 40} ${horizonY - 28} L${cx - 40} ${horizonY - 8} Z" fill="${pal.accent}" fill-opacity="0.72"/>
-        <path d="M${cx + 40} ${horizonY - 8} L${cx + 40} ${horizonY - 28} Q${cx + 52} ${horizonY - 40} ${cx + 64} ${horizonY - 28} L${cx + 64} ${horizonY - 8} Z" fill="${pal.accent}" fill-opacity="0.72"/>
-        ${motes}
-      `;
-    } else if (sceneIndex === 1) {
-      // Scene 2: Ornate glowing Islamic lantern (Fanous) inside arch with radiant light
-      const lx = cx;
-      const ly = Math.round(h * 0.44);
-      const lSize = Math.round(minDim * 0.14);
-      const archW = Math.round(minDim * 0.62);
-      sceneElements = `
-        ${stars}
-        <circle cx="${lx}" cy="${ly}" r="${Math.round(minDim * 0.48)}" fill="url(#radialGlow)"/>
-        <!-- Archway frame -->
-        <path d="M0 0 H${w} V${h} H0 Z M${cx - archW / 2} ${h} L${cx - archW / 2} ${Math.round(h * 0.36)} Q${cx} ${Math.round(h * 0.14)} ${cx + archW / 2} ${Math.round(h * 0.36)} L${cx + archW / 2} ${h} Z" fill="${pal.silFront}" fill-rule="evenodd" fill-opacity="0.85"/>
-        <!-- Hanging chain & lantern -->
-        <line x1="${lx}" y1="0" x2="${lx}" y2="${ly - lSize}" stroke="${pal.accent}" stroke-width="4"/>
-        <polygon points="${lx},${ly - lSize} ${lx - lSize * 0.6},${ly - lSize * 0.45} ${lx + lSize * 0.6},${ly - lSize * 0.45}" fill="${pal.silMid}" stroke="${pal.accent}" stroke-width="3"/>
-        <rect x="${lx - lSize * 0.5}" y="${ly - lSize * 0.45}" width="${lSize}" height="${lSize * 1.15}" rx="8" fill="${pal.glow}" fill-opacity="0.92" stroke="${pal.accent}" stroke-width="4"/>
-        <line x1="${lx}" y1="${ly - lSize * 0.45}" x2="${lx}" y2="${ly + lSize * 0.7}" stroke="${pal.silMid}" stroke-width="3"/>
-        <polygon points="${lx - lSize * 0.55},${ly + lSize * 0.7} ${lx + lSize * 0.55},${ly + lSize * 0.7} ${lx},${ly + lSize * 1.05}" fill="${pal.silMid}" stroke="${pal.accent}" stroke-width="3"/>
-        ${motes}
-      `;
-    } else {
-      // Scene 3: Radiant golden dawn sunbeams over calm water & cypress silhouettes
-      const sunY = Math.round(horizonY - minDim * 0.04);
-      sceneElements = `
-        ${stars}
-        <circle cx="${cx}" cy="${sunY}" r="${Math.round(minDim * 0.52)}" fill="url(#radialGlow)"/>
-        <polygon points="${cx},${sunY} ${Math.round(w * 0.05)},0 ${Math.round(w * 0.32)},0" fill="${pal.glow}" fill-opacity="0.09"/>
-        <polygon points="${cx},${sunY} ${Math.round(w * 0.42)},0 ${Math.round(w * 0.62)},0" fill="${pal.glow}" fill-opacity="0.12"/>
-        <polygon points="${cx},${sunY} ${Math.round(w * 0.7)},0 ${Math.round(w * 0.95)},0" fill="${pal.glow}" fill-opacity="0.09"/>
-        <circle cx="${cx}" cy="${sunY}" r="${Math.round(minDim * 0.11)}" fill="#fef3c7" fill-opacity="0.95"/>
-        <!-- Calm lake reflection -->
-        <rect x="0" y="${horizonY}" width="${w}" height="${h - horizonY}" fill="${pal.silMid}"/>
-        <ellipse cx="${cx}" cy="${horizonY + 28}" rx="${Math.round(minDim * 0.22)}" ry="10" fill="${pal.accent}" fill-opacity="0.45"/>
-        <ellipse cx="${cx}" cy="${horizonY + 62}" rx="${Math.round(minDim * 0.16)}" ry="7" fill="${pal.accent}" fill-opacity="0.32"/>
-        <ellipse cx="${cx}" cy="${horizonY + 95}" rx="${Math.round(minDim * 0.1)}" ry="5" fill="${pal.accent}" fill-opacity="0.22"/>
-        <!-- Cypress tree silhouettes -->
-        <ellipse cx="${Math.round(w * 0.14)}" cy="${horizonY - 45}" rx="22" ry="72" fill="${pal.silFront}"/>
-        <ellipse cx="${Math.round(w * 0.22)}" cy="${horizonY - 32}" rx="16" ry="52" fill="${pal.silFront}"/>
-        <ellipse cx="${Math.round(w * 0.84)}" cy="${horizonY - 48}" rx="24" ry="76" fill="${pal.silFront}"/>
-        ${motes}
-      `;
-    }
-  } else if (theme === 'ocean') {
-    const bubbles = buildParticlesSvg(w, h, seed + sceneIndex * 17, 26, '#a5f3fc');
-    if (sceneIndex === 0) {
-      sceneElements = `
-        <circle cx="${cx}" cy="${Math.round(horizonY - 30)}" r="${Math.round(minDim * 0.36)}" fill="url(#radialGlow)"/>
-        <circle cx="${cx}" cy="${Math.round(horizonY - 24)}" r="${Math.round(minDim * 0.12)}" fill="#fef08a" fill-opacity="0.9"/>
-        <path d="M0 ${horizonY} Q${w * 0.25} ${horizonY - 24} ${w * 0.5} ${horizonY} T${w} ${horizonY} L${w} ${h} L0 ${h} Z" fill="${pal.silBack}"/>
-        <path d="M0 ${horizonY + 35} Q${w * 0.3} ${horizonY + 12} ${w * 0.6} ${horizonY + 38} T${w} ${horizonY + 25} L${w} ${h} L0 ${h} Z" fill="${pal.silMid}"/>
-        <path d="M0 ${horizonY + 75} Q${w * 0.2} ${horizonY + 55} ${w * 0.55} ${horizonY + 80} T${w} ${horizonY + 65} L${w} ${h} L0 ${h} Z" fill="${pal.silFront}"/>
-        ${bubbles}
-      `;
-    } else if (sceneIndex === 1) {
-      // Underwater rays + whale silhouette
-      const wx = Math.round(w * 0.52);
-      const wy = Math.round(h * 0.48);
-      sceneElements = `
-        <polygon points="${w * 0.25},0 ${w * 0.45},0 ${w * 0.65},${h} ${w * 0.1},${h}" fill="${pal.glow}" fill-opacity="0.1"/>
-        <polygon points="${w * 0.55},0 ${w * 0.72},0 ${w * 0.92},${h} ${w * 0.48},${h}" fill="${pal.glow}" fill-opacity="0.08"/>
-        <path d="M${wx - 120} ${wy} Q${wx - 20} ${wy - 68} ${wx + 90} ${wy - 10} Q${wx + 140} ${wy - 45} ${wx + 165} ${wy - 22} Q${wx + 135} ${wy + 5} ${wx + 155} ${wy + 34} Q${wx + 115} ${wy + 18} ${wx + 80} ${wy + 15} Q${wx - 35} ${wy + 52} ${wx - 120} ${wy} Z" fill="${pal.silFront}"/>
-        ${bubbles}
-      `;
-    } else {
-      // Bioluminescent jellyfish
-      const jx = cx;
-      const jy = Math.round(h * 0.4);
-      const jr = Math.round(minDim * 0.13);
-      sceneElements = `
-        <circle cx="${jx}" cy="${jy}" r="${Math.round(minDim * 0.4)}" fill="url(#radialGlow)"/>
-        <path d="M${jx - jr} ${jy} Q${jx} ${jy - jr * 1.4} ${jx + jr} ${jy} Z" fill="${pal.accent}" fill-opacity="0.82"/>
-        <path d="M${jx - jr * 0.6} ${jy} Q${jx - jr * 0.8} ${jy + jr * 1.3} ${jx - jr * 0.4} ${jy + jr * 2.1}" stroke="${pal.glow}" stroke-width="4" fill="none" stroke-opacity="0.7"/>
-        <path d="M${jx} ${jy} Q${jx + jr * 0.2} ${jy + jr * 1.5} ${jx - jr * 0.1} ${jy + jr * 2.4}" stroke="${pal.glow}" stroke-width="4" fill="none" stroke-opacity="0.8"/>
-        <path d="M${jx + jr * 0.6} ${jy} Q${jx + jr * 0.9} ${jy + jr * 1.3} ${jx + jr * 0.5} ${jy + jr * 2.0}" stroke="${pal.glow}" stroke-width="4" fill="none" stroke-opacity="0.7"/>
-        ${bubbles}
-      `;
-    }
-  } else if (theme === 'cyber') {
-    const lights = buildParticlesSvg(w, h, seed + sceneIndex * 21, 30, pal.glow);
-    const buildings: string[] = [];
-    const cols = 10;
-    const bw = Math.ceil(w / cols);
-    for (let i = 0; i < cols; i++) {
-      const bh = Math.round(h * (0.25 + (((seed + i * 37 + sceneIndex * 13) % 40) / 100)));
-      const bx = i * bw;
-      const by = h - bh;
-      buildings.push(`<rect x="${bx}" y="${by}" width="${bw - 4}" height="${bh}" fill="${pal.silFront}"/>`);
-      buildings.push(
-        `<rect x="${bx + 8}" y="${by + 16}" width="${Math.max(6, bw - 22)}" height="6" fill="${i % 2 === 0 ? pal.glow : pal.accent}" fill-opacity="0.85"/>`
-      );
-      buildings.push(
-        `<rect x="${bx + 8}" y="${by + 34}" width="${Math.max(6, bw - 28)}" height="6" fill="${i % 2 === 1 ? pal.glow : pal.accent}" fill-opacity="0.6"/>`
-      );
-    }
-    sceneElements = `
-      <circle cx="${cx}" cy="${Math.round(h * 0.36)}" r="${Math.round(minDim * 0.38)}" fill="url(#radialGlow)"/>
-      <circle cx="${cx}" cy="${Math.round(h * 0.36)}" r="${Math.round(minDim * 0.14)}" fill="${pal.accent}" fill-opacity="0.4"/>
-      ${buildings.join('')}
-      ${lights}
-    `;
-  } else if (theme === 'cosmos') {
-    const stars = buildStarsSvg(w, h, seed + sceneIndex * 19, 75, '#ffffff');
-    const px = Math.round(w * (sceneIndex === 0 ? 0.5 : sceneIndex === 1 ? 0.38 : 0.62));
-    const py = Math.round(h * 0.42);
-    const pr = Math.round(minDim * (sceneIndex === 1 ? 0.18 : 0.13));
-    sceneElements = `
-      ${stars}
-      <circle cx="${px}" cy="${py}" r="${Math.round(minDim * 0.45)}" fill="url(#radialGlow)"/>
-      <circle cx="${px}" cy="${py}" r="${pr}" fill="${pal.skyBottom}"/>
-      <ellipse cx="${px}" cy="${py}" rx="${Math.round(pr * 2.1)}" ry="${Math.round(pr * 0.42)}" transform="rotate(-18 ${px} ${py})" fill="none" stroke="${pal.glow}" stroke-width="6" stroke-opacity="0.7"/>
-      <path d="M0 ${horizonY + 50} Q${cx} ${horizonY - 10} ${w} ${horizonY + 45} L${w} ${h} L0 ${h} Z" fill="${pal.silFront}"/>
-    `;
-  } else if (theme === 'desert') {
-    const stars = buildStarsSvg(w, h, seed + sceneIndex * 13, 30, '#fef08a');
-    const sunX = Math.round(w * (sceneIndex === 0 ? 0.5 : sceneIndex === 1 ? 0.32 : 0.68));
-    const sunY = Math.round(h * (sceneIndex === 2 ? 0.28 : 0.46));
-    sceneElements = `
-      ${stars}
-      <circle cx="${sunX}" cy="${sunY}" r="${Math.round(minDim * 0.42)}" fill="url(#radialGlow)"/>
-      <circle cx="${sunX}" cy="${sunY}" r="${Math.round(minDim * 0.12)}" fill="#fef08a" fill-opacity="0.92"/>
-      <path d="M0 ${horizonY} Q${w * 0.35} ${horizonY - 70} ${w} ${horizonY + 10} L${w} ${h} L0 ${h} Z" fill="${pal.silBack}"/>
-      <path d="M0 ${horizonY + 40} Q${w * 0.65} ${horizonY - 40} ${w} ${horizonY + 55} L${w} ${h} L0 ${h} Z" fill="${pal.silMid}"/>
-      <path d="M0 ${horizonY + 90} Q${w * 0.3} ${horizonY + 35} ${w} ${horizonY + 105} L${w} ${h} L0 ${h} Z" fill="${pal.silFront}"/>
-    `;
+function drawExoticBirdSvg(bx: number, by: number, scale: number, openBeak: boolean): string {
+  const s = scale;
+  const parts: string[] = [];
+  // Tail feathers (turquoise + violet)
+  parts.push(`<path d="M${bx - 16 * s} ${by + 16 * s} L${bx - 52 * s} ${by + 64 * s} L${bx - 22 * s} ${by + 58 * s} L${bx - 6 * s} ${by + 24 * s} Z" fill="#6d28d9"/>`);
+  // Turquoise body
+  parts.push(`<ellipse cx="${bx}" cy="${by + 12 * s}" rx="${28 * s}" ry="${38 * s}" transform="rotate(-12 ${bx} ${by + 12 * s})" fill="#06b6d4"/>`);
+  // Golden-yellow chest
+  parts.push(`<ellipse cx="${bx + 9 * s}" cy="${by + 16 * s}" rx="${16 * s}" ry="${26 * s}" fill="#facc15"/>`);
+  // Violet wing
+  parts.push(`<path d="M${bx - 22 * s} ${by - 4 * s} Q${bx - 36 * s} ${by + 20 * s} ${bx - 12 * s} ${by + 42 * s} Q${bx + 6 * s} ${by + 24 * s} ${bx - 2 * s} ${by - 2 * s} Z" fill="#7c3aed"/>`);
+  // Head & crest
+  parts.push(`<circle cx="${bx + 6 * s}" cy="${by - 26 * s}" r="${21 * s}" fill="#0891b2"/>`);
+  parts.push(`<path d="M${bx - 2 * s} ${by - 42 * s} Q${bx - 14 * s} ${by - 62 * s} ${bx - 24 * s} ${by - 50 * s} Q${bx - 10 * s} ${by - 42 * s} ${bx + 4 * s} ${by - 44 * s} Z" fill="#a855f7"/>`);
+  // Expressive sparkling eye
+  parts.push(`<circle cx="${bx + 13 * s}" cy="${by - 29 * s}" r="${6.2 * s}" fill="#0f172a"/>`);
+  parts.push(`<circle cx="${bx + 15 * s}" cy="${by - 31 * s}" r="${2.2 * s}" fill="#ffffff"/>`);
+  // Tiny orange beak (open when speaking in Scene 1)
+  if (openBeak) {
+    parts.push(`<polygon points="${bx + 24 * s},${by - 29 * s} ${bx + 44 * s},${by - 27 * s} ${bx + 24 * s},${by - 21 * s}" fill="#f97316"/>`);
+    parts.push(`<polygon points="${bx + 24 * s},${by - 21 * s} ${bx + 41 * s},${by - 15 * s} ${bx + 23 * s},${by - 16 * s}" fill="#ea580c"/>`);
   } else {
-    // forest, mountain, sunset, studio: rich layered peaks/trees + atmospheric rays
-    const stars = buildStarsSvg(w, h, seed + sceneIndex * 17, 35, '#e2e8f0');
-    const motes = buildParticlesSvg(w, h, seed + sceneIndex * 23, 20, pal.glow);
-    const sunX = Math.round(w * (sceneIndex === 0 ? 0.5 : sceneIndex === 1 ? 0.34 : 0.66));
-    const sunY = Math.round(horizonY - minDim * 0.1);
-    sceneElements = `
-      ${stars}
-      <circle cx="${sunX}" cy="${sunY}" r="${Math.round(minDim * 0.45)}" fill="url(#radialGlow)"/>
-      <polygon points="${sunX},${sunY} ${w * 0.12},${h} ${w * 0.42},${h}" fill="${pal.glow}" fill-opacity="0.07"/>
-      <polygon points="${sunX},${sunY} ${w * 0.56},${h} ${w * 0.88},${h}" fill="${pal.glow}" fill-opacity="0.07"/>
-      <circle cx="${sunX}" cy="${sunY}" r="${Math.round(minDim * 0.1)}" fill="${pal.glow}" fill-opacity="0.88"/>
-      <polygon points="0,${horizonY + 40} ${w * 0.22},${horizonY - 85} ${w * 0.48},${horizonY + 35} ${w * 0.74},${horizonY - 105} ${w},${horizonY + 25} ${w},${h} 0,${h}" fill="${pal.silBack}"/>
-      <polygon points="0,${horizonY + 75} ${w * 0.18},${horizonY - 15} ${w * 0.42},${horizonY + 60} ${w * 0.68},${horizonY - 35} ${w},${horizonY + 70} ${w},${h} 0,${h}" fill="${pal.silMid}"/>
-      <path d="M0 ${horizonY + 95} Q${cx} ${horizonY + 55} ${w} ${horizonY + 95} L${w} ${h} L0 ${h} Z" fill="${pal.silFront}"/>
-      ${motes}
-    `;
+    parts.push(`<polygon points="${bx + 24 * s},${by - 29 * s} ${bx + 44 * s},${by - 23 * s} ${bx + 24 * s},${by - 17 * s}" fill="#f97316"/>`);
+  }
+  return parts.join('\n  ');
+}
+
+function drawGardenSceneSvg(w: number, h: number, sceneIndex: 0 | 1 | 2, seed: number): string {
+  const minDim = Math.min(w, h);
+  const cx = Math.round(w * 0.5);
+  const horizonY = Math.round(h * 0.62);
+  const layers: string[] = [];
+
+  // Golden sunrise glow & sunbeams
+  const sunX = Math.round(w * (sceneIndex === 1 ? 0.72 : 0.5));
+  const sunY = Math.round(horizonY - minDim * 0.14);
+  layers.push(`<circle cx="${sunX}" cy="${sunY}" r="${Math.round(minDim * 0.48)}" fill="url(#radialGlow)"/>`);
+  layers.push(`<circle cx="${sunX}" cy="${sunY}" r="${Math.round(minDim * 0.13)}" fill="#fef9c3" fill-opacity="0.95"/>`);
+
+  // Soft sunlit rays
+  for (let i = -2; i <= 2; i++) {
+    layers.push(
+      `<polygon points="${sunX},${sunY} ${cx + i * w * 0.28 - 40},${h} ${cx + i * w * 0.28 + 40},${h}" fill="#fef08a" fill-opacity="0.09"/>`
+    );
   }
 
-  // Crisp RTL / LTR bottom subtitle card
+  // Meadow hills + crystal-clear flowing stream
+  layers.push(`<path d="M0 ${horizonY + 12} Q${w * 0.3} ${horizonY - 40} ${w} ${horizonY + 8} L${w} ${h} L0 ${h} Z" fill="#15803d"/>`);
+  layers.push(`<path d="M0 ${horizonY + 45} Q${w * 0.65} ${horizonY + 10} ${w} ${horizonY + 48} L${w} ${h} L0 ${h} Z" fill="#166534"/>`);
+  if (sceneIndex !== 1) {
+    layers.push(
+      `<path d="M${w * 0.42} ${horizonY + 16} Q${w * 0.62} ${horizonY + 95} ${w * 0.35} ${h} L${w * 0.68} ${h} Q${w * 0.8} ${horizonY + 95} ${w * 0.52} ${horizonY + 16} Z" fill="#38bdf8" fill-opacity="0.82"/>`
+    );
+    layers.push(
+      `<ellipse cx="${w * 0.52}" cy="${horizonY + 90}" rx="${minDim * 0.08}" ry="5" fill="#e0f2fe" fill-opacity="0.7"/>`
+    );
+  }
+
+  // Curved flowering tree branch across frame
+  const branchY = sceneIndex === 1 ? Math.round(h * 0.56) : Math.round(h * 0.44);
+  layers.push(
+    `<path d="M0 ${branchY + 55} Q${w * 0.38} ${branchY - 10} ${w * 0.86} ${branchY + 18}" stroke="#57341a" stroke-width="${Math.round(minDim * 0.04)}" fill="none" stroke-linecap="round"/>`
+  );
+  // Tree blossoms (pink & white)
+  const blossomPts = [0.16, 0.28, 0.42, 0.64, 0.78, 0.86];
+  blossomPts.forEach((px, idx) => {
+    const bx = Math.round(w * px);
+    const by = Math.round(branchY + (idx % 2 === 0 ? -18 : 14));
+    const r = Math.round(minDim * (sceneIndex === 1 ? 0.042 : 0.032));
+    layers.push(`<circle cx="${bx}" cy="${by}" r="${r}" fill="${idx % 2 === 0 ? '#fbcfe8' : '#ffffff'}" fill-opacity="0.92"/>`);
+    layers.push(`<circle cx="${bx}" cy="${by}" r="${Math.round(r * 0.36)}" fill="#facc15"/>`);
+  });
+
+  // Colorful garden flowers in foreground (roses, tulips, lavender)
+  const flowerColors = ['#ffffff', '#f472b6', '#a855f7', '#fb7185', '#fef08a', '#c084fc'];
+  for (let i = 0; i < 14; i++) {
+    const fx = Math.round((((seed * 13 + i * 71) % 90) + 5) * (w / 100));
+    const fy = Math.round(horizonY + 55 + ((i * 29) % Math.max(40, Math.round(h * 0.22))));
+    const fr = Math.round(minDim * 0.024);
+    const col = flowerColors[i % flowerColors.length];
+    layers.push(`<line x1="${fx}" y1="${fy}" x2="${fx}" y2="${fy + 26}" stroke="#14532d" stroke-width="3"/>`);
+    layers.push(`<circle cx="${fx}" cy="${fy}" r="${fr}" fill="${col}"/>`);
+    layers.push(`<circle cx="${fx}" cy="${fy}" r="${Math.round(fr * 0.35)}" fill="#fde047"/>`);
+  }
+
+  // Exotic Turquoise/Violet/Gold Bird perched on the branch
+  const birdScale = sceneIndex === 1 ? minDim / 300 : minDim / 520;
+  const birdX = Math.round(w * 0.5);
+  const birdY = Math.round(branchY - 12 * birdScale);
+  layers.push(drawExoticBirdSvg(birdX, birdY, birdScale, sceneIndex === 1));
+
+  // Graceful colorful butterflies
+  const butterflies = [
+    { x: w * 0.22, y: h * 0.32, c: '#f472b6' },
+    { x: w * 0.78, y: h * 0.28, c: '#38bdf8' },
+    { x: w * 0.28, y: h * 0.72, c: '#facc15' },
+  ];
+  for (const b of butterflies) {
+    layers.push(`<ellipse cx="${b.x - 8}" cy="${b.y}" rx="9" ry="6" fill="${b.c}" fill-opacity="0.88"/>`);
+    layers.push(`<ellipse cx="${b.x + 8}" cy="${b.y}" rx="9" ry="6" fill="${b.c}" fill-opacity="0.88"/>`);
+    layers.push(`<line x1="${b.x}" y1="${b.y - 6}" x2="${b.x}" y2="${b.y + 6}" stroke="#1e293b" stroke-width="2"/>`);
+  }
+
+  layers.push(buildParticlesSvg(w, h, seed + sceneIndex * 19, 24, '#fef9c3'));
+  return layers.join('\n  ');
+}
+
+function buildCaptionOverlaySvg(w: number, h: number, caption: string, accent: string): string {
+  const minDim = Math.min(w, h);
+  const cx = Math.round(w * 0.5);
   const isRtl = hasRtlCharacters(caption);
   const maxChars = w < h ? 28 : 48;
   const lines = wrapCaptionLines(caption, maxChars);
@@ -705,7 +781,7 @@ export function renderSceneSvg(params: {
   const boxH = lines.length === 2 ? fontSize * 3.1 : fontSize * 2.1;
   const boxW = Math.round(w * 0.86);
   const boxX = Math.round((w - boxW) / 2);
-  const boxY = Math.round(h - boxH - h * 0.08);
+  const boxY = Math.round(h - boxH - h * 0.075);
   const fontFamily = isRtl
     ? 'Noto Naskh Arabic, Noto Nastaliq Urdu, DejaVu Sans, sans-serif'
     : 'Noto Sans, DejaVu Sans, sans-serif';
@@ -716,6 +792,291 @@ export function renderSceneSvg(params: {
       return `<text x="${cx}" y="${ty}" text-anchor="middle" font-family="${fontFamily}" font-size="${fontSize}" font-weight="bold" fill="#f8fafc"${isRtl ? ' direction="rtl"' : ''}>${xmlEscape(line)}</text>`;
     })
     .join('\n  ');
+
+  return `
+  <rect x="${boxX}" y="${boxY}" width="${boxW}" height="${Math.round(boxH)}" rx="16" fill="#020617" fill-opacity="0.68" stroke="${accent}" stroke-opacity="0.35" stroke-width="2"/>
+  ${textTags}`;
+}
+
+export function renderSceneSvg(params: {
+  theme: SceneTheme;
+  sceneIndex: 0 | 1 | 2;
+  width: number;
+  height: number;
+  caption: string;
+  beatPrompt?: string;
+  objectTags?: string[];
+  fullPrompt?: string;
+  seed: number;
+}): string {
+  const { theme, sceneIndex, width: w, height: h, caption, beatPrompt, objectTags, fullPrompt, seed } = params;
+  const detectedBeatTheme = beatPrompt ? detectSceneTheme(beatPrompt) : theme;
+  const effectiveTheme =
+    theme === 'garden'
+      ? 'garden'
+      : detectedBeatTheme !== 'studio'
+      ? detectedBeatTheme
+      : theme;
+  const pal = THEME_PALETTES[effectiveTheme];
+
+  const textForObjects = `${beatPrompt || ''} ${caption} ${(objectTags ?? []).join(' ')}`.toLowerCase();
+  const minDim = Math.min(w, h);
+  const horizonY = Math.round(h * (sceneIndex === 1 ? 0.64 : 0.68));
+  const cx = Math.round(w * 0.5);
+
+  let innerLayers = '';
+
+  if (
+    effectiveTheme === 'garden' ||
+    /flower|garden|butterfly|butterflies|blossom|tulip|rose|lavender|exotic\s*bird|stream/.test(
+      `${fullPrompt || ''} ${textForObjects}`.toLowerCase()
+    )
+  ) {
+    innerLayers = drawGardenSceneSvg(w, h, sceneIndex, seed);
+  } else {
+    const hasDawnOrDay = /dawn|sunrise|morning|daylight|sunny|noon|طلوع|صبح|دن/.test(textForObjects);
+    const hasExplicitConcreteProp =
+      /clock|time|hourglass|book|grave|cemetery|car|vehicle|boat|ship|house|cabin|candle|fire|وقت|گھڑی|کتاب|قبر|کار|گاڑی|کشتی|گھر|شمع/.test(
+        textForObjects
+      );
+
+    const hasNight =
+      !hasDawnOrDay &&
+      (/night|star|moon|twilight|آخرت|رات|چاند|ستارے|قبر|lantern|cosmos/.test(textForObjects) ||
+        effectiveTheme === 'spiritual-twilight' ||
+        effectiveTheme === 'cosmos' ||
+        effectiveTheme === 'cyber');
+    const hasRain = /rain|storm|thunder|بارش|طوفان/.test(textForObjects);
+    const hasClouds = /cloud|fog|mist|storm|بادل|دھند/.test(textForObjects);
+    const hasMosque =
+      /mosque|masjid|dome|minaret|مسجد|نماز/.test(textForObjects) ||
+      (!hasExplicitConcreteProp && effectiveTheme === 'spiritual-twilight' && sceneIndex === 0);
+    const hasLantern =
+      /lantern|lamp|fanous|فانوس|چراغ/.test(textForObjects) ||
+      (!hasExplicitConcreteProp && effectiveTheme === 'spiritual-twilight' && sceneIndex === 1);
+    const hasCandleOrFire = /candle|fire|flame|lava|شمع|آگ/.test(textForObjects);
+    const hasClock = /clock|time|hour|hourglass|seconds|وقت|گھڑی/.test(textForObjects);
+    const hasBook = /book|quran|read|pages|کتاب|قرآن/.test(textForObjects);
+    const hasTraveler = /man|woman|boy|girl|person|traveler|human|prayer|praying|dua|انسان|آدمی|لڑکا|مسافر|دعا/.test(
+      textForObjects
+    );
+    const hasGrave = /grave|cemetery|tomb|قبر|قبرستان/.test(textForObjects);
+    const hasCar = /car|vehicle|highway|drive|drifting|کار|گاڑی|سڑک/.test(textForObjects);
+    const hasBoat = /boat|ship|sail|کشتی|جہاز/.test(textForObjects);
+    const hasBirds = /bird|birds|eagle|dove|seagull|پرندے|پرندہ/.test(textForObjects);
+    const hasHouse = /house|home|cabin|cottage|گھر|مکان/.test(textForObjects);
+    const hasTrees =
+      /tree|forest|pine|jungle|garden|leaf|درخت|جنگل|باغ/.test(textForObjects) || effectiveTheme === 'forest';
+    const hasWater =
+      /ocean|sea|water|river|lake|wave|stream|سمندر|دریا|پانی/.test(textForObjects) ||
+      effectiveTheme === 'ocean' ||
+      (!hasExplicitConcreteProp && effectiveTheme === 'spiritual-twilight' && sceneIndex === 2);
+
+    const layers: string[] = [];
+
+    if (hasNight) {
+      layers.push(buildStarsSvg(w, h, seed + sceneIndex * 11, 52, '#fef3c7'));
+    }
+
+    const glowY = sceneIndex === 1 ? Math.round(h * 0.42) : Math.round(horizonY - minDim * 0.1);
+    layers.push(`<circle cx="${cx}" cy="${glowY}" r="${Math.round(minDim * 0.46)}" fill="url(#radialGlow)"/>`);
+
+    if (effectiveTheme === 'cosmos' || /planet|earth|space/.test(textForObjects)) {
+      const px = Math.round(w * (sceneIndex === 1 ? 0.4 : 0.56));
+      const py = Math.round(h * 0.36);
+      const pr = Math.round(minDim * 0.13);
+      layers.push(`<circle cx="${px}" cy="${py}" r="${pr}" fill="${pal.skyBottom}"/>`);
+      layers.push(
+        `<ellipse cx="${px}" cy="${py}" rx="${Math.round(pr * 2.1)}" ry="${Math.round(pr * 0.4)}" transform="rotate(-16 ${px} ${py})" fill="none" stroke="${pal.glow}" stroke-width="5" stroke-opacity="0.72"/>`
+      );
+    } else if (!hasDawnOrDay && (effectiveTheme === 'spiritual-twilight' || /crescent|moon|چاند/.test(textForObjects))) {
+      const mx = Math.round(w * (sceneIndex === 0 ? 0.68 : 0.32));
+      const my = Math.round(h * 0.22);
+      const mr = Math.round(minDim * 0.08);
+      layers.push(`<circle cx="${mx}" cy="${my}" r="${mr}" fill="#fef3c7"/>`);
+      if (!/full\s*moon/.test(textForObjects)) {
+        layers.push(
+          `<circle cx="${mx + Math.round(mr * 0.34)}" cy="${my - Math.round(mr * 0.24)}" r="${Math.round(mr * 0.88)}" fill="${pal.skyTop}"/>`
+        );
+      }
+    } else {
+      const sx = Math.round(w * (sceneIndex === 0 ? 0.5 : sceneIndex === 1 ? 0.35 : 0.55));
+      const sy = Math.round(horizonY - minDim * 0.12);
+      layers.push(`<circle cx="${sx}" cy="${sy}" r="${Math.round(minDim * 0.11)}" fill="${pal.glow}" fill-opacity="0.92"/>`);
+    }
+
+    if (hasClouds) {
+      const cy = Math.round(h * 0.24);
+      layers.push(
+        `<ellipse cx="${w * 0.3}" cy="${cy}" rx="${minDim * 0.18}" ry="${minDim * 0.06}" fill="#cbd5e1" fill-opacity="0.22"/>`
+      );
+      layers.push(
+        `<ellipse cx="${w * 0.68}" cy="${cy + 24}" rx="${minDim * 0.22}" ry="${minDim * 0.07}" fill="#cbd5e1" fill-opacity="0.18"/>`
+      );
+    }
+
+    if (effectiveTheme === 'cyber') {
+      const cols = 10;
+      const bw = Math.ceil(w / cols);
+      for (let i = 0; i < cols; i++) {
+        const bh = Math.round(h * (0.25 + (((seed + i * 37 + sceneIndex * 13) % 38) / 100)));
+        const bx = i * bw;
+        const by = h - bh;
+        layers.push(`<rect x="${bx}" y="${by}" width="${bw - 4}" height="${bh}" fill="${pal.silFront}"/>`);
+        layers.push(
+          `<rect x="${bx + 8}" y="${by + 18}" width="${Math.max(6, bw - 22)}" height="5" fill="${i % 2 === 0 ? pal.glow : pal.accent}" fill-opacity="0.85"/>`
+        );
+      }
+    } else if (effectiveTheme === 'desert') {
+      layers.push(
+        `<path d="M0 ${horizonY} Q${w * 0.35} ${horizonY - 70} ${w} ${horizonY + 10} L${w} ${h} L0 ${h} Z" fill="${pal.silBack}"/>`
+      );
+      layers.push(
+        `<path d="M0 ${horizonY + 45} Q${w * 0.65} ${horizonY - 35} ${w} ${horizonY + 55} L${w} ${h} L0 ${h} Z" fill="${pal.silFront}"/>`
+      );
+    } else if (hasWater) {
+      layers.push(
+        `<path d="M0 ${horizonY} Q${w * 0.25} ${horizonY - 20} ${w * 0.5} ${horizonY} T${w} ${horizonY} L${w} ${h} L0 ${h} Z" fill="${pal.silMid}"/>`
+      );
+      layers.push(
+        `<ellipse cx="${cx}" cy="${horizonY + 28}" rx="${Math.round(minDim * 0.2)}" ry="8" fill="${pal.accent}" fill-opacity="0.45"/>`
+      );
+      layers.push(
+        `<ellipse cx="${cx}" cy="${horizonY + 60}" rx="${Math.round(minDim * 0.13)}" ry="6" fill="${pal.accent}" fill-opacity="0.3"/>`
+      );
+    } else {
+      layers.push(
+        `<polygon points="0,${horizonY + 30} ${w * 0.22},${horizonY - 85} ${w * 0.48},${horizonY + 25} ${w * 0.74},${horizonY - 100} ${w},${horizonY + 20} ${w},${h} 0,${h}" fill="${pal.silBack}"/>`
+      );
+      layers.push(`<rect x="0" y="${horizonY + 20}" width="${w}" height="${h - horizonY}" fill="${pal.silFront}"/>`);
+    }
+
+    if (hasMosque) {
+      const domeW = Math.round(w * 0.4);
+      const domeTop = Math.round(horizonY - minDim * 0.2);
+      const minW = Math.round(minDim * 0.036);
+      const leftMinX = Math.round(cx - domeW * 0.66);
+      const rightMinX = Math.round(cx + domeW * 0.66 - minW);
+      const minTop = Math.round(horizonY - minDim * 0.32);
+      layers.push(`<rect x="${leftMinX}" y="${minTop}" width="${minW}" height="${horizonY - minTop + 20}" fill="${pal.silFront}"/>`);
+      layers.push(
+        `<polygon points="${leftMinX + minW / 2},${minTop - minW * 1.4} ${leftMinX - 4},${minTop} ${leftMinX + minW + 4},${minTop}" fill="${pal.silFront}"/>`
+      );
+      layers.push(`<rect x="${rightMinX}" y="${minTop}" width="${minW}" height="${horizonY - minTop + 20}" fill="${pal.silFront}"/>`);
+      layers.push(
+        `<polygon points="${rightMinX + minW / 2},${minTop - minW * 1.4} ${rightMinX - 4},${minTop} ${rightMinX + minW + 4},${minTop}" fill="${pal.silFront}"/>`
+      );
+      layers.push(
+        `<path d="M${cx - domeW / 2} ${horizonY + 16} L${cx - domeW / 2} ${domeTop + minDim * 0.08} Q${cx} ${domeTop - minDim * 0.12} ${cx + domeW / 2} ${domeTop + minDim * 0.08} L${cx + domeW / 2} ${horizonY + 16} Z" fill="${pal.silFront}"/>`
+      );
+      layers.push(
+        `<path d="M${cx - 15} ${horizonY - 8} L${cx - 15} ${horizonY - 36} Q${cx} ${horizonY - 50} ${cx + 15} ${horizonY - 36} L${cx + 15} ${horizonY - 8} Z" fill="${pal.accent}" fill-opacity="0.88"/>`
+      );
+    }
+
+    if (hasLantern) {
+      const lx = cx;
+      const ly = Math.round(h * 0.43);
+      const ls = Math.round(minDim * 0.13);
+      layers.push(`<line x1="${lx}" y1="0" x2="${lx}" y2="${ly - ls}" stroke="${pal.accent}" stroke-width="4"/>`);
+      layers.push(
+        `<rect x="${lx - ls * 0.5}" y="${ly - ls * 0.45}" width="${ls}" height="${ls * 1.15}" rx="8" fill="${pal.glow}" fill-opacity="0.92" stroke="${pal.accent}" stroke-width="4"/>`
+      );
+    }
+
+    if (hasCandleOrFire) {
+      const fx = Math.round(w * 0.5);
+      const fy = Math.round(horizonY - 12);
+      layers.push(`<rect x="${fx - 14}" y="${fy - 45}" width="28" height="65" rx="4" fill="#fef3c7"/>`);
+      layers.push(`<path d="M${fx} ${fy - 95} Q${fx + 22} ${fy - 62} ${fx} ${fy - 46} Q${fx - 22} ${fy - 62} ${fx} ${fy - 95} Z" fill="#fb923c"/>`);
+      layers.push(`<path d="M${fx} ${fy - 80} Q${fx + 10} ${fy - 58} ${fx} ${fy - 48} Q${fx - 10} ${fy - 58} ${fx} ${fy - 80} Z" fill="#fef08a"/>`);
+    }
+
+    if (hasClock) {
+      const kx = cx;
+      const ky = Math.round(h * 0.44);
+      const kr = Math.round(minDim * 0.14);
+      layers.push(`<circle cx="${kx}" cy="${ky}" r="${kr}" fill="#020617" fill-opacity="0.7" stroke="${pal.accent}" stroke-width="5"/>`);
+      layers.push(`<line x1="${kx}" y1="${ky}" x2="${kx}" y2="${ky - kr * 0.65}" stroke="#fef3c7" stroke-width="4" stroke-linecap="round"/>`);
+      layers.push(`<line x1="${kx}" y1="${ky}" x2="${kx + kr * 0.48}" y2="${ky + kr * 0.2}" stroke="${pal.accent}" stroke-width="4" stroke-linecap="round"/>`);
+    }
+
+    if (hasBook) {
+      const bx = cx;
+      const by = Math.round(horizonY - 18);
+      const bw = Math.round(minDim * 0.34);
+      layers.push(
+        `<path d="M${bx} ${by} Q${bx - bw * 0.5} ${by - 28} ${bx - bw} ${by - 8} L${bx - bw} ${by + 38} Q${bx - bw * 0.5} ${by + 18} ${bx} ${by + 44} Q${bx + bw * 0.5} ${by + 18} ${bx + bw} ${by + 38} L${bx + bw} ${by - 8} Q${bx + bw * 0.5} ${by - 28} ${bx} ${by} Z" fill="#fef3c7" stroke="${pal.accent}" stroke-width="3"/>`
+      );
+    }
+
+    if (hasGrave) {
+      for (const gxOff of [-0.22, 0.04, 0.24]) {
+        const gx = Math.round(cx + w * gxOff);
+        layers.push(
+          `<path d="M${gx - 18} ${horizonY + 42} L${gx - 18} ${horizonY - 18} Q${gx} ${horizonY - 38} ${gx + 18} ${horizonY - 18} L${gx + 18} ${horizonY + 42} Z" fill="${pal.silMid}" stroke="${pal.accent}" stroke-opacity="0.28" stroke-width="2"/>`
+        );
+      }
+    }
+
+    if (hasHouse) {
+      const hx = Math.round(w * 0.26);
+      const hy = horizonY;
+      layers.push(`<rect x="${hx - 45}" y="${hy - 55}" width="90" height="65" fill="${pal.silFront}"/>`);
+      layers.push(`<polygon points="${hx - 58},${hy - 55} ${hx},${hy - 102} ${hx + 58},${hy - 55}" fill="${pal.silMid}"/>`);
+      layers.push(`<rect x="${hx - 14}" y="${hy - 36}" width="24" height="22" fill="${pal.accent}" fill-opacity="0.88"/>`);
+    }
+
+    if (hasTrees) {
+      for (const txOff of [0.12, 0.2, 0.82, 0.9]) {
+        const tx = Math.round(w * txOff);
+        layers.push(`<polygon points="${tx},${horizonY - 95} ${tx - 28},${horizonY + 12} ${tx + 28},${horizonY + 12}" fill="${pal.silFront}"/>`);
+      }
+    }
+
+    if (hasCar) {
+      const rx = cx;
+      const ry = horizonY + 36;
+      layers.push(`<polygon points="${rx - 60},${ry - 18} ${rx + 60},${ry - 18} ${rx + 180},${h} ${rx - 180},${h}" fill="#1e293b"/>`);
+      layers.push(`<rect x="${rx - 44}" y="${ry - 32}" width="88" height="26" rx="8" fill="#ef4444"/>`);
+      layers.push(`<circle cx="${rx - 28}" cy="${ry - 6}" r="9" fill="#0f172a"/>`);
+      layers.push(`<circle cx="${rx + 28}" cy="${ry - 6}" r="9" fill="#0f172a"/>`);
+    }
+
+    if (hasBoat) {
+      const bx = Math.round(w * 0.48);
+      const by = horizonY + 24;
+      layers.push(`<polygon points="${bx - 55},${by} ${bx + 55},${by} ${bx + 36},${by + 24} ${bx - 36},${by + 24}" fill="${pal.silFront}"/>`);
+      layers.push(`<polygon points="${bx},${by - 72} ${bx},${by - 4} ${bx + 40},${by - 4}" fill="#fef3c7" fill-opacity="0.85"/>`);
+    }
+
+    if (hasTraveler) {
+      const px = Math.round(w * (hasMosque ? 0.24 : 0.5));
+      const py = horizonY + 26;
+      layers.push(`<circle cx="${px}" cy="${py - 56}" r="14" fill="${pal.silFront}"/>`);
+      layers.push(`<path d="M${px - 18} ${py} L${px - 12} ${py - 40} L${px + 12} ${py - 40} L${px + 18} ${py} Z" fill="${pal.silFront}"/>`);
+    }
+
+    if (hasBirds) {
+      for (let i = 0; i < 5; i++) {
+        const bx = Math.round(w * (0.24 + i * 0.12));
+        const by = Math.round(h * (0.22 + (i % 2) * 0.05));
+        layers.push(
+          `<path d="M${bx - 12} ${by} Q${bx - 6} ${by - 8} ${bx} ${by} Q${bx + 6} ${by - 8} ${bx + 12} ${by}" fill="none" stroke="${pal.glow}" stroke-width="2.5"/>`
+        );
+      }
+    }
+
+    if (hasRain) {
+      layers.push(buildRainSvg(w, h, seed + sceneIndex));
+    } else {
+      layers.push(buildParticlesSvg(w, h, seed + sceneIndex * 23, 20, pal.glow));
+    }
+
+    innerLayers = layers.join('\n  ');
+  }
+
+  const captionSvg = buildCaptionOverlaySvg(w, h, caption, pal.accent);
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
   <defs>
@@ -731,29 +1092,24 @@ export function renderSceneSvg(params: {
     </radialGradient>
   </defs>
   <rect width="${w}" height="${h}" fill="url(#sky)"/>
-  ${sceneElements}
-  <rect x="${boxX}" y="${boxY}" width="${boxW}" height="${Math.round(boxH)}" rx="16" fill="#020617" fill-opacity="0.68" stroke="${pal.accent}" stroke-opacity="0.35" stroke-width="2"/>
-  ${textTags}
+  ${innerLayers}
+  ${captionSvg}
 </svg>`;
 }
 
 export function getAmbientExprForTheme(theme: SceneTheme): string {
-  // Gentle harmonic stereo ambient pad tuned to scene mood
   switch (theme) {
+    case 'garden':
+      return '0.04*sin(2*PI*174.61*t)+0.025*sin(2*PI*261.63*t)+0.02*sin(2*PI*349.23*t)+0.015*sin(2*PI*440.0*t)';
     case 'spiritual-twilight':
-      // Calm reflective D minor 9 / fifth drone
       return '0.045*sin(2*PI*146.83*t)+0.03*sin(2*PI*220.0*t)+0.02*sin(2*PI*293.66*t)+0.015*sin(2*PI*349.23*t)';
     case 'ocean':
-      // Soft rolling Cmaj7 pad
       return '0.04*sin(2*PI*130.81*t)+0.025*sin(2*PI*196.0*t)+0.02*sin(2*PI*246.94*t)';
     case 'cyber':
-      // Warm synth A minor pulse
       return '0.04*sin(2*PI*110.0*t)+0.025*sin(2*PI*164.81*t)+0.02*sin(2*PI*220.0*t)*(0.7+0.3*sin(2*PI*2*t))';
     case 'cosmos':
-      // Deep space F# suspended pad
       return '0.04*sin(2*PI*185.0*t)+0.025*sin(2*PI*277.18*t)+0.02*sin(2*PI*369.99*t)';
     default:
-      // Warm cinematic G major 9 ambient bed
       return '0.04*sin(2*PI*196.0*t)+0.025*sin(2*PI*293.66*t)+0.02*sin(2*PI*392.0*t)';
   }
 }
