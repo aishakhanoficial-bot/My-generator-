@@ -456,6 +456,10 @@ export default function App() {
             />
           )}
         </main>
+
+        <footer className="border-t border-slate-200 dark:border-slate-800 px-4 sm:px-6 py-3 text-center text-xs text-slate-500 dark:text-slate-400">
+          developed by Ayesha Khan
+        </footer>
       </div>
 
       {/* Modals */}
