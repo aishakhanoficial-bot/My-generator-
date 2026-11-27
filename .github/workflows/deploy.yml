@@ -41,7 +41,7 @@ jobs:
 
       - name: Build production bundle for GitHub Pages
         env:
-          VITE_BASE_PATH: /My-generator-अब/
+          VITE_BASE_PATH: "/My-generator-अब/"
         run: npm run build
 
       - name: Setup GitHub Pages

@@ -5,6 +5,7 @@ import path from 'path';
 import {defineConfig} from 'vite';
 
 const GITHUB_PAGES_BASE = '/My-generator-अब/';
+const ROOT_DIR = import.meta.dirname;
 
 export default defineConfig(({command}) => {
   return {
@@ -20,8 +21,8 @@ export default defineConfig(({command}) => {
           if (error) {
             return;
           }
-          const distDir = path.resolve(__dirname, 'dist');
-          const srcAssets = path.resolve(__dirname, 'src/assets');
+          const distDir = path.resolve(ROOT_DIR, 'dist');
+          const srcAssets = path.resolve(ROOT_DIR, 'src/assets');
           const distAssets = path.resolve(distDir, 'src/assets');
           if (fs.existsSync(distDir) && fs.existsSync(srcAssets)) {
             fs.cpSync(srcAssets, distAssets, {recursive: true, force: true});
@@ -36,7 +37,7 @@ export default defineConfig(({command}) => {
     ],
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, '.'),
+        '@': path.resolve(ROOT_DIR, '.'),
       },
     },
     server: {
