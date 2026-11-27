@@ -7,6 +7,7 @@
     "dev": "tsx server.ts",
     "build": "vite build",
     "build:gh-pages": "VITE_BASE_PATH=/My-generator-अब/ vite build",
+    "build:single": "node scripts/build-single-html.mjs",
     "start": "NODE_ENV=production tsx server.ts",
     "preview": "vite preview --host 0.0.0.0",
     "clean": "rm -rf dist server.js",

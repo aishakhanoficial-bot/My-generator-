@@ -463,6 +463,22 @@ async function startServer() {
     return res.json({ ok: true });
   });
 
+  // Download self-contained single-file index.html for offline/browser sharing
+  app.get('/api/download-single-html', async (_req, res) => {
+    try {
+      const standalonePath = path.resolve(process.cwd(), 'standalone', 'index.html');
+      if (!fs.existsSync(standalonePath)) {
+        const mod = await import('./scripts/build-single-html.mjs');
+        await mod.buildSingleHtml();
+      }
+      return res.download(standalonePath, 'index.html');
+    } catch (err) {
+      return res.status(500).json({
+        error: err instanceof Error ? err.message : 'Failed to build single HTML file.',
+      });
+    }
+  });
+
   // Mount Vite middleware in dev or serve static dist in production
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({

@@ -23,6 +23,13 @@ export function isStaticHostingMode(): boolean {
   return staticMode;
 }
 
+export function isSingleFileHtml(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    Boolean((window as unknown as { __SINGLE_FILE_HTML__?: boolean }).__SINGLE_FILE_HTML__)
+  );
+}
+
 export function getVideoStreamUrl(jobId: string): string {
   if (staticMode) {
     return browserRuntime.getVideoUrl(jobId) ?? '';
@@ -89,6 +96,14 @@ async function handleJson<T>(res: Response): Promise<T> {
 
 export const api = {
   bootstrap: async (): Promise<BootstrapResponse> => {
+    if (
+      typeof window !== 'undefined' &&
+      (window.location.protocol === 'file:' ||
+        (window as unknown as { __SINGLE_FILE_HTML__?: boolean }).__SINGLE_FILE_HTML__)
+    ) {
+      staticMode = true;
+      return browserRuntime.bootstrap();
+    }
     try {
       const res = await fetch('/api/bootstrap');
       const contentType = res.headers.get('content-type') ?? '';
