@@ -13,6 +13,12 @@ import {
   VideoModelSpec,
 } from '../shared/types.js';
 import { OUTPUTS_DIR, resolveSafeFilePath, UPLOADS_DIR } from './storage.js';
+import {
+  getAmbientExprForTheme,
+  planStoryboardAndVoiceover,
+  renderSceneSvg,
+  SceneStoryboard,
+} from './sceneArt.js';
 
 let cachedFfmpegAvailable: boolean | null = null;
 
@@ -67,6 +73,7 @@ export function computeCacheKey(job: VideoJob, assets?: JobInputAssets): string 
     .createHash('sha256')
     .update(
       JSON.stringify({
+        version: 'v2-av-scenes',
         workflow: job.workflow,
         prompt: job.prompt.trim(),
         negativePrompt: (job.negativePrompt ?? '').trim(),
@@ -85,122 +92,6 @@ export function computeCacheKey(job: VideoJob, assets?: JobInputAssets): string 
     .slice(0, 24);
 }
 
-interface Palette {
-  bgTop: [number, number, number];
-  bgBottom: [number, number, number];
-  orbA: [number, number, number];
-  orbB: [number, number, number];
-}
-
-function selectPalette(prompt: string, seed: number): Palette {
-  const p = prompt.toLowerCase();
-  if (/ocean|sea|water|whale|wave|underwater|blue|glacier/.test(p)) {
-    return {
-      bgTop: [8, 28, 56],
-      bgBottom: [14, 78, 118],
-      orbA: [45, 212, 191],
-      orbB: [56, 189, 248],
-    };
-  }
-  if (/sunset|golden|desert|sand|dune|lava|fire|autumn|amber/.test(p)) {
-    return {
-      bgTop: [36, 16, 38],
-      bgBottom: [154, 52, 18],
-      orbA: [251, 146, 60],
-      orbB: [250, 204, 21],
-    };
-  }
-  if (/forest|jungle|moss|emerald|nature|garden|leaf|mountain/.test(p)) {
-    return {
-      bgTop: [10, 32, 24],
-      bgBottom: [20, 83, 45],
-      orbA: [74, 222, 128],
-      orbB: [163, 230, 53],
-    };
-  }
-  if (/cyber|neon|city|tokyo|night|rain|futuristic|synth/.test(p)) {
-    return {
-      bgTop: [12, 14, 34],
-      bgBottom: [49, 16, 66],
-      orbA: [34, 211, 238],
-      orbB: [244, 114, 182],
-    };
-  }
-  if (/space|cosmos|galaxy|nebula|star|planet|astronaut/.test(p)) {
-    return {
-      bgTop: [5, 7, 18],
-      bgBottom: [30, 27, 75],
-      orbA: [129, 140, 248],
-      orbB: [56, 189, 248],
-    };
-  }
-  // Deterministic procedural palette from seed
-  const h = (seed % 360) / 360;
-  const c1: [number, number, number] = [
-    Math.round(30 + 180 * Math.abs(Math.sin(h * Math.PI * 2))),
-    Math.round(40 + 160 * Math.abs(Math.sin((h + 0.33) * Math.PI * 2))),
-    Math.round(60 + 170 * Math.abs(Math.sin((h + 0.66) * Math.PI * 2))),
-  ];
-  const c2: [number, number, number] = [
-    Math.round(40 + 180 * Math.abs(Math.cos(h * Math.PI * 2))),
-    Math.round(50 + 160 * Math.abs(Math.cos((h + 0.25) * Math.PI * 2))),
-    Math.round(70 + 170 * Math.abs(Math.cos((h + 0.5) * Math.PI * 2))),
-  ];
-  return {
-    bgTop: [15, 23, 42],
-    bgBottom: [30, 41, 59],
-    orbA: c1,
-    orbB: c2,
-  };
-}
-
-function generateProceduralPpm(
-  filePath: string,
-  width: number,
-  height: number,
-  prompt: string,
-  seed: number
-) {
-  const pal = selectPalette(prompt, seed);
-  // Render at slightly oversized canvas for smooth zoompan without edge clipping
-  const w = Math.min(width, 960);
-  const h = Math.min(height, 540);
-  const header = Buffer.from(`P6\n${w} ${h}\n255\n`, 'ascii');
-  const pixels = Buffer.allocUnsafe(w * h * 3);
-
-  const cx1 = ((seed * 37) % 100) / 100;
-  const cy1 = ((seed * 53) % 100) / 100;
-  const cx2 = ((seed * 71 + 30) % 100) / 100;
-  const cy2 = ((seed * 89 + 20) % 100) / 100;
-  const freq = 2.0 + ((seed % 5) * 0.6);
-
-  let offset = 0;
-  for (let y = 0; y < h; y++) {
-    const ny = y / h;
-    for (let x = 0; x < w; x++) {
-      const nx = x / w;
-      const wave = 0.5 + 0.5 * Math.sin(nx * freq * Math.PI + ny * 2.2 + (seed % 10));
-      const d1 = Math.hypot(nx - cx1, (ny - cy1) * (h / w));
-      const d2 = Math.hypot(nx - cx2, (ny - cy2) * (h / w));
-      const glow1 = Math.exp(-d1 * d1 * 6.5);
-      const glow2 = Math.exp(-d2 * d2 * 5.0);
-
-      let r = pal.bgTop[0] * (1 - ny) + pal.bgBottom[0] * ny;
-      let g = pal.bgTop[1] * (1 - ny) + pal.bgBottom[1] * ny;
-      let b = pal.bgTop[2] * (1 - ny) + pal.bgBottom[2] * ny;
-
-      r = r * (0.85 + 0.15 * wave) + pal.orbA[0] * glow1 * 0.75 + pal.orbB[0] * glow2 * 0.6;
-      g = g * (0.85 + 0.15 * wave) + pal.orbA[1] * glow1 * 0.75 + pal.orbB[1] * glow2 * 0.6;
-      b = b * (0.85 + 0.15 * wave) + pal.orbA[2] * glow1 * 0.75 + pal.orbB[2] * glow2 * 0.6;
-
-      pixels[offset++] = Math.max(0, Math.min(255, r | 0));
-      pixels[offset++] = Math.max(0, Math.min(255, g | 0));
-      pixels[offset++] = Math.max(0, Math.min(255, b | 0));
-    }
-  }
-
-  fs.writeFileSync(filePath, Buffer.concat([header, pixels]));
-}
 
 function saveDataUrlToFile(dataUrl: string, prefix: string): string {
   const match = dataUrl.match(/^data:([a-zA-Z0-9/+.-]+);base64,(.+)$/);
@@ -227,6 +118,7 @@ function getEncodingArgs(encoding: EncodingPreset): {
   ext: string;
   mime: string;
   codecArgs: string[];
+  audioArgs: string[];
 } {
   switch (encoding) {
     case 'h264-hq':
@@ -234,18 +126,21 @@ function getEncodingArgs(encoding: EncodingPreset): {
         ext: 'mp4',
         mime: 'video/mp4',
         codecArgs: ['-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p', '-movflags', '+faststart'],
+        audioArgs: ['-c:a', 'aac', '-b:a', '160k', '-ac', '2', '-ar', '44100'],
       };
     case 'hevc':
       return {
         ext: 'mp4',
         mime: 'video/mp4',
         codecArgs: ['-c:v', 'libx265', '-preset', 'fast', '-crf', '24', '-pix_fmt', 'yuv420p', '-tag:v', 'hvc1', '-movflags', '+faststart'],
+        audioArgs: ['-c:a', 'aac', '-b:a', '128k', '-ac', '2', '-ar', '44100'],
       };
     case 'vp9':
       return {
         ext: 'webm',
         mime: 'video/webm',
         codecArgs: ['-c:v', 'libvpx-vp9', '-crf', '30', '-b:v', '0', '-deadline', 'realtime', '-cpu-used', '4', '-pix_fmt', 'yuv420p'],
+        audioArgs: ['-c:a', 'libopus', '-b:a', '96k', '-ac', '2', '-ar', '48000'],
       };
     case 'h264-fast':
     default:
@@ -253,8 +148,114 @@ function getEncodingArgs(encoding: EncodingPreset): {
         ext: 'mp4',
         mime: 'video/mp4',
         codecArgs: ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p', '-movflags', '+faststart'],
+        audioArgs: ['-c:a', 'aac', '-b:a', '128k', '-ac', '2', '-ar', '44100'],
       };
   }
+}
+
+function probeHasAudio(filePath: string): boolean {
+  try {
+    const out = execFileSync(
+      'ffprobe',
+      ['-v', 'error', '-select_streams', 'a', '-show_entries', 'stream=index', '-of', 'csv=p=0', filePath],
+      { encoding: 'utf8', timeout: 5000 }
+    );
+    return out.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
+async function synthesizeJobAudioWav(params: {
+  job: VideoJob;
+  storyboard: SceneStoryboard;
+  geminiVoiceWavPath: string | null;
+  tempFiles: string[];
+  abortSignal: AbortSignal;
+}): Promise<string> {
+  const { job, storyboard, geminiVoiceWavPath, tempFiles, abortSignal } = params;
+  const audioOutPath = resolveSafeFilePath(UPLOADS_DIR, `${job.id}_audio.wav`);
+  if (!audioOutPath) throw new Error('Invalid audio output path.');
+  tempFiles.push(audioOutPath);
+
+  const dur = job.durationSec;
+  const fadeOutStart = Math.max(0.2, dur - 0.8);
+  const ambientExpr = getAmbientExprForTheme(storyboard.theme);
+
+  // 1. If Gemini TTS produced a complete WAV voiceover, mix it with the soft stereo ambient bed
+  if (geminiVoiceWavPath && fs.existsSync(geminiVoiceWavPath)) {
+    try {
+      await runFfmpeg(
+        [
+          '-y',
+          '-i', geminiVoiceWavPath,
+          '-f', 'lavfi', '-t', String(dur), '-i', `aevalsrc=${ambientExpr}:s=44100:c=stereo`,
+          '-filter_complex',
+          `[0:a]aresample=44100,aformat=channel_layouts=stereo,volume=1.35,apad[vo];[1:a]afade=t=in:st=0:d=0.5,afade=t=out:st=${fadeOutStart.toFixed(2)}:d=0.8[bg];[vo][bg]amix=inputs=2:duration=shortest:normalize=0[aout]`,
+          '-map', '[aout]',
+          '-t', String(dur),
+          '-c:a', 'pcm_s16le',
+          audioOutPath,
+        ],
+        undefined,
+        undefined,
+        abortSignal
+      );
+      return audioOutPath;
+    } catch {
+      // Fall through to local flite + ambient synthesis
+    }
+  }
+
+  // 2. Local FFmpeg flite voice synthesis + mood-matched stereo ambient bed
+  const speakText = storyboard.speakableAsciiFallback.trim();
+  if (speakText.length > 0) {
+    const txtPath = resolveSafeFilePath(UPLOADS_DIR, `${job.id}_voice.txt`);
+    if (txtPath) {
+      tempFiles.push(txtPath);
+      fs.writeFileSync(txtPath, speakText, 'utf8');
+      const fliteVoice =
+        storyboard.voiceName === 'Charon' || storyboard.voiceName === 'Puck' ? 'rms' : 'slt';
+      const escapedTxtPath = txtPath.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'");
+      try {
+        await runFfmpeg(
+          [
+            '-y',
+            '-f', 'lavfi', '-i', `flite=textfile='${escapedTxtPath}':voice=${fliteVoice}`,
+            '-f', 'lavfi', '-t', String(dur), '-i', `aevalsrc=${ambientExpr}:s=44100:c=stereo`,
+            '-filter_complex',
+            `[0:a]aresample=44100,aformat=channel_layouts=stereo,volume=1.55,apad[vo];[1:a]afade=t=in:st=0:d=0.5,afade=t=out:st=${fadeOutStart.toFixed(2)}:d=0.8[bg];[vo][bg]amix=inputs=2:duration=shortest:normalize=0[aout]`,
+            '-map', '[aout]',
+            '-t', String(dur),
+            '-c:a', 'pcm_s16le',
+            audioOutPath,
+          ],
+          undefined,
+          undefined,
+          abortSignal
+        );
+        return audioOutPath;
+      } catch {
+        // Fall through to pure ambient bed
+      }
+    }
+  }
+
+  // 3. Guaranteed stereo ambient bed fallback (never silent)
+  await runFfmpeg(
+    [
+      '-y',
+      '-f', 'lavfi', '-t', String(dur), '-i', `aevalsrc=${ambientExpr}:s=44100:c=stereo`,
+      '-af', `afade=t=in:st=0:d=0.5,afade=t=out:st=${fadeOutStart.toFixed(2)}:d=0.8`,
+      '-t', String(dur),
+      '-c:a', 'pcm_s16le',
+      audioOutPath,
+    ],
+    undefined,
+    undefined,
+    abortSignal
+  );
+  return audioOutPath;
 }
 
 function runFfmpeg(
@@ -549,7 +550,7 @@ export async function executeVideoJob(
 
   const { width, height } = getDimensions(job.resolution, job.aspectRatio);
   const totalFrames = Math.max(24, Math.round(job.durationSec * job.fps));
-  const { ext, mime, codecArgs } = getEncodingArgs(job.encoding);
+  const { ext, mime, codecArgs, audioArgs } = getEncodingArgs(job.encoding);
   const fileName = `${job.id}.${ext}`;
   const outPath = resolveSafeFilePath(OUTPUTS_DIR, fileName);
   if (!outPath) throw new Error('Invalid output path.');
@@ -566,24 +567,56 @@ export async function executeVideoJob(
   };
 
   try {
-    onStage(12, `Initializing ${model.name} (${job.quantization.toUpperCase()}) pipeline`);
+    onStage(10, `Initializing ${model.name} (${job.quantization.toUpperCase()}) pipeline`);
+
+    const geminiVoiceOut = resolveSafeFilePath(UPLOADS_DIR, `${job.id}_gemini_voice.wav`);
+    if (geminiVoiceOut) tempFiles.push(geminiVoiceOut);
+
+    const allowGemini = !job.batchTotal || job.batchTotal <= 5;
+    onStage(16, 'Planning visual storyboard and spoken voiceover');
+    const { storyboard, voiceWavPath } = await planStoryboardAndVoiceover({
+      prompt: job.prompt,
+      durationSec: job.durationSec,
+      jobId: job.id,
+      voiceOutPath: geminiVoiceOut || path.join(UPLOADS_DIR, `${job.id}_gemini_voice.wav`),
+      allowGemini,
+    });
+
+    onStage(24, voiceWavPath ? 'Mixing Gemini AI voiceover + ambient audio' : 'Synthesizing voiceover narration + ambient audio');
+    const audioWavPath = await synthesizeJobAudioWav({
+      job,
+      storyboard,
+      geminiVoiceWavPath: voiceWavPath,
+      tempFiles,
+      abortSignal,
+    });
 
     if (job.workflow === 'image-to-video' && assets?.imageDataUrl) {
-      onStage(25, 'Animating input image with motion camera trajectory');
+      onStage(32, 'Animating input image with motion camera trajectory + audio');
       const imgPath = saveDataUrlToFile(assets.imageDataUrl, `${job.id}_img`);
       tempFiles.push(imgPath);
 
-      const zoomExpr = job.seed % 2 === 0 ? "min(zoom+0.0016,1.28)" : "if(lte(zoom,1.0),1.25,max(1.0,zoom-0.0014))";
-      const filter = `scale=${width * 2}:${height * 2}:force_original_aspect_ratio=increase,crop=${width * 2}:${height * 2},zoompan=z='${zoomExpr}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${totalFrames}:s=${width}x${height}:fps=${job.fps},vignette=PI/6`;
+      const zoomExpr = job.seed % 2 === 0 ? 'min(zoom+0.0016,1.24)' : 'if(lte(zoom,1.0),1.22,max(1.0,zoom-0.0014))';
+      const filter = `[0:v]scale=${width * 2}:${height * 2}:force_original_aspect_ratio=increase,crop=${width * 2}:${height * 2},zoompan=z='${zoomExpr}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${totalFrames}:s=${width}x${height}:fps=${job.fps},vignette=PI/6,format=yuv420p[vout]`;
 
       await runFfmpeg(
-        ['-y', '-loop', '1', '-i', imgPath, '-vf', filter, '-t', String(job.durationSec), ...codecArgs, outPath],
+        [
+          '-y',
+          '-loop', '1', '-i', imgPath,
+          '-i', audioWavPath,
+          '-filter_complex', filter,
+          '-map', '[vout]', '-map', '1:a',
+          '-t', String(job.durationSec),
+          ...codecArgs,
+          ...audioArgs,
+          outPath,
+        ],
         (pct) => onStage(pct, `Rendering I2V motion frames (${job.fps} fps)`),
         totalFrames,
         abortSignal
       );
     } else if (job.workflow === 'frame-interpolation' && assets?.imageDataUrl && assets?.endFrameDataUrl) {
-      onStage(25, 'Interpolating start and end keyframes');
+      onStage(32, 'Interpolating start and end keyframes + audio');
       const startImg = saveDataUrlToFile(assets.imageDataUrl, `${job.id}_start`);
       const endImg = saveDataUrlToFile(assets.endFrameDataUrl, `${job.id}_end`);
       tempFiles.push(startImg, endImg);
@@ -592,17 +625,19 @@ export async function executeVideoJob(
       const offsetSec = Math.max(0.4, job.durationSec - halfDur);
       const transDur = Math.max(0.6, job.durationSec - offsetSec);
 
-      const filterComplex = `[0:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1,fps=${job.fps}[v0];[1:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1,fps=${job.fps}[v1];[v0][v1]xfade=transition=smoothleft:duration=${transDur.toFixed(2)}:offset=${offsetSec.toFixed(2)},format=yuv420p[out]`;
+      const filterComplex = `[0:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1,fps=${job.fps}[v0];[1:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1,fps=${job.fps}[v1];[v0][v1]xfade=transition=smoothleft:duration=${transDur.toFixed(2)}:offset=${offsetSec.toFixed(2)},format=yuv420p[vout]`;
 
       await runFfmpeg(
         [
           '-y',
           '-loop', '1', '-t', String(halfDur + 0.5), '-i', startImg,
           '-loop', '1', '-t', String(halfDur + 0.5), '-i', endImg,
+          '-i', audioWavPath,
           '-filter_complex', filterComplex,
-          '-map', '[out]',
+          '-map', '[vout]', '-map', '2:a',
           '-t', String(job.durationSec),
           ...codecArgs,
+          ...audioArgs,
           outPath,
         ],
         (pct) => onStage(pct, 'Blending optical keyframe transitions'),
@@ -610,7 +645,7 @@ export async function executeVideoJob(
         abortSignal
       );
     } else if (job.workflow === 'reference-image' && assets?.referenceImages?.length) {
-      onStage(25, `Synthesizing storyboard from ${assets.referenceImages.length} reference image(s)`);
+      onStage(32, `Synthesizing storyboard from ${assets.referenceImages.length} reference image(s) + audio`);
       const refPaths = assets.referenceImages.slice(0, 3).map((r, idx) => {
         const p = saveDataUrlToFile(r, `${job.id}_ref${idx}`);
         tempFiles.push(p);
@@ -618,9 +653,19 @@ export async function executeVideoJob(
       });
 
       if (refPaths.length === 1) {
-        const filter = `scale=${width * 2}:${height * 2}:force_original_aspect_ratio=increase,crop=${width * 2}:${height * 2},zoompan=z='min(zoom+0.0014,1.22)':d=${totalFrames}:s=${width}x${height}:fps=${job.fps},hue=h='t*6'`;
+        const filter = `[0:v]scale=${width * 2}:${height * 2}:force_original_aspect_ratio=increase,crop=${width * 2}:${height * 2},zoompan=z='min(zoom+0.0014,1.22)':d=${totalFrames}:s=${width}x${height}:fps=${job.fps},format=yuv420p[vout]`;
         await runFfmpeg(
-          ['-y', '-loop', '1', '-i', refPaths[0], '-vf', filter, '-t', String(job.durationSec), ...codecArgs, outPath],
+          [
+            '-y',
+            '-loop', '1', '-i', refPaths[0],
+            '-i', audioWavPath,
+            '-filter_complex', filter,
+            '-map', '[vout]', '-map', '1:a',
+            '-t', String(job.durationSec),
+            ...codecArgs,
+            ...audioArgs,
+            outPath,
+          ],
           (pct) => onStage(pct, 'Rendering reference-guided motion'),
           totalFrames,
           abortSignal
@@ -635,25 +680,37 @@ export async function executeVideoJob(
             `[${idx}:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1,fps=${job.fps}[r${idx}]`
           );
         });
+        const audioInputIdx = refPaths.length;
+        inputs.push('-i', audioWavPath);
+
         let chain = '';
         let prev = '[r0]';
         const step = job.durationSec / refPaths.length;
         for (let i = 1; i < refPaths.length; i++) {
-          const outTag = i === refPaths.length - 1 ? '[out]' : `[x${i}]`;
+          const outTag = i === refPaths.length - 1 ? '[vout]' : `[x${i}]`;
           const off = Math.max(0.3, step * i - 0.3);
           chain += `${prev}[r${i}]xfade=transition=fade:duration=0.6:offset=${off.toFixed(2)}${outTag};`;
           prev = outTag;
         }
         const filterComplex = `${prepFilters.join(';')};${chain.slice(0, -1)}`;
         await runFfmpeg(
-          ['-y', ...inputs, '-filter_complex', filterComplex, '-map', '[out]', '-t', String(job.durationSec), ...codecArgs, outPath],
+          [
+            '-y',
+            ...inputs,
+            '-filter_complex', filterComplex,
+            '-map', '[vout]', '-map', `${audioInputIdx}:a`,
+            '-t', String(job.durationSec),
+            ...codecArgs,
+            ...audioArgs,
+            outPath,
+          ],
           (pct) => onStage(pct, 'Compositing multi-reference sequence'),
           totalFrames,
           abortSignal
         );
       }
     } else if (job.workflow === 'video-edit' && (assets?.sourceVideoDataUrl || assets?.sourceVideoJobId)) {
-      onStage(25, 'Applying video-to-video editing pipeline');
+      onStage(32, 'Applying video-to-video editing pipeline');
       let sourcePath: string | null = null;
       if (assets.sourceVideoDataUrl) {
         sourcePath = saveDataUrlToFile(assets.sourceVideoDataUrl, `${job.id}_srcvid`);
@@ -686,33 +743,114 @@ export async function executeVideoJob(
         vf += ',eq=contrast=1.12:saturation=1.18,unsharp=5:5:0.8:5:5:0.0,vignette=PI/6';
       }
 
-      await runFfmpeg(
-        ['-y', '-i', sourcePath, '-vf', vf, '-an', '-t', String(job.durationSec), ...codecArgs, outPath],
-        (pct) => onStage(pct, `Processing video edit (${mode})`),
-        totalFrames,
-        abortSignal
-      );
+      const sourceHasAudio = probeHasAudio(sourcePath);
+      if (sourceHasAudio) {
+        const af =
+          mode === 'speed-2x'
+            ? '-af atempo=2.0'
+            : mode === 'reverse'
+            ? '-af areverse'
+            : '';
+        const audioFilterArgs = af ? af.split(' ') : [];
+        await runFfmpeg(
+          [
+            '-y',
+            '-i', sourcePath,
+            '-vf', vf,
+            ...audioFilterArgs,
+            '-map', '0:v', '-map', '0:a',
+            '-t', String(job.durationSec),
+            ...codecArgs,
+            ...audioArgs,
+            outPath,
+          ],
+          (pct) => onStage(pct, `Processing video edit (${mode})`),
+          totalFrames,
+          abortSignal
+        );
+      } else {
+        await runFfmpeg(
+          [
+            '-y',
+            '-i', sourcePath,
+            '-i', audioWavPath,
+            '-vf', vf,
+            '-map', '0:v', '-map', '1:a',
+            '-t', String(job.durationSec),
+            ...codecArgs,
+            ...audioArgs,
+            outPath,
+          ],
+          (pct) => onStage(pct, `Processing video edit (${mode}) + audio`),
+          totalFrames,
+          abortSignal
+        );
+      }
     } else {
-      // Text-to-Video (Self-Hosted Procedural Diffusion Synthesis Engine)
-      onStage(22, `Synthesizing scene latent frames via ${model.name}`);
-      const ppmPath = resolveSafeFilePath(UPLOADS_DIR, `${job.id}_latent.ppm`);
-      if (!ppmPath) throw new Error('Invalid temp frame path.');
-      tempFiles.push(ppmPath);
+      // Text-to-Video: Multi-scene illustrated SVG storyboard + motion transitions + audio
+      onStage(34, `Rendering 3 illustrated scenes for ${storyboard.theme}`);
 
-      generateProceduralPpm(ppmPath, width, height, job.prompt, job.seed);
+      const scenePngs: string[] = [];
+      for (const idx of [0, 1, 2] as const) {
+        const svgPath = resolveSafeFilePath(UPLOADS_DIR, `${job.id}_scene${idx}.svg`);
+        const pngPath = resolveSafeFilePath(UPLOADS_DIR, `${job.id}_scene${idx}.png`);
+        if (!svgPath || !pngPath) throw new Error('Invalid temp scene path.');
+        tempFiles.push(svgPath, pngPath);
 
-      const driftDir = job.seed % 2 === 0 ? 1 : -1;
-      const hueShift = driftDir > 0 ? "hue=h='t*10'" : "hue=h='-t*8'";
-      const zoomExpr =
-        job.seed % 3 === 0
-          ? "min(zoom+0.0018,1.32)"
-          : "if(lte(zoom,1.0),1.28,max(1.0,zoom-0.0015))";
-      const panX = driftDir > 0 ? "iw/2-(iw/zoom/2)+on*0.4" : "iw/2-(iw/zoom/2)-on*0.35";
-      const filter = `scale=${width * 2}:${height * 2},zoompan=z='${zoomExpr}':x='${panX}':y='ih/2-(ih/zoom/2)':d=${totalFrames}:s=${width}x${height}:fps=${job.fps},${hueShift},vignette=PI/5`;
+        const svgMarkup = renderSceneSvg({
+          theme: storyboard.theme,
+          sceneIndex: idx,
+          width,
+          height,
+          caption: storyboard.sceneCaptions[idx],
+          seed: job.seed,
+        });
+        fs.writeFileSync(svgPath, svgMarkup, 'utf8');
+
+        await runFfmpeg(['-y', '-i', svgPath, '-frames:v', '1', pngPath], undefined, undefined, abortSignal);
+        scenePngs.push(pngPath);
+      }
+
+      onStage(52, `Compositing scenes & encoding ${job.resolution} ${job.encoding.toUpperCase()} + audio`);
+
+      const fadeDur = Math.min(0.6, job.durationSec * 0.16);
+      const step = job.durationSec / 3;
+      const segDur0 = step + fadeDur;
+      const segDur1 = step + fadeDur;
+      const segDur2 = Math.max(1.0, job.durationSec - step * 2 + fadeDur);
+      const off1 = Math.max(0.4, step - fadeDur * 0.5);
+      const off2 = Math.max(off1 + 0.4, step * 2 - fadeDur * 0.5);
+
+      const segFrames0 = Math.max(12, Math.round(segDur0 * job.fps));
+      const segFrames1 = Math.max(12, Math.round(segDur1 * job.fps));
+      const segFrames2 = Math.max(12, Math.round(segDur2 * job.fps));
+
+      const sw = Math.round(width * 1.12 / 2) * 2;
+      const sh = Math.round(height * 1.12 / 2) * 2;
+
+      const filterComplex = [
+        `[0:v]scale=${sw}:${sh},zoompan=z='min(zoom+0.0012,1.10)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${segFrames0}:s=${width}x${height}:fps=${job.fps},setsar=1[v0]`,
+        `[1:v]scale=${sw}:${sh},zoompan=z='if(lte(zoom,1.0),1.10,max(1.0,zoom-0.0010))':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${segFrames1}:s=${width}x${height}:fps=${job.fps},setsar=1[v1]`,
+        `[2:v]scale=${sw}:${sh},zoompan=z='min(zoom+0.0012,1.10)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${segFrames2}:s=${width}x${height}:fps=${job.fps},setsar=1[v2]`,
+        `[v0][v1]xfade=transition=fade:duration=${fadeDur.toFixed(2)}:offset=${off1.toFixed(2)}[x1]`,
+        `[x1][v2]xfade=transition=smoothleft:duration=${fadeDur.toFixed(2)}:offset=${off2.toFixed(2)},vignette=PI/6,format=yuv420p[vout]`,
+      ].join(';');
 
       await runFfmpeg(
-        ['-y', '-loop', '1', '-i', ppmPath, '-vf', filter, '-t', String(job.durationSec), ...codecArgs, outPath],
-        (pct) => onStage(pct, `Encoding ${job.resolution} ${job.encoding.toUpperCase()} output`),
+        [
+          '-y',
+          '-loop', '1', '-t', segDur0.toFixed(2), '-i', scenePngs[0],
+          '-loop', '1', '-t', segDur1.toFixed(2), '-i', scenePngs[1],
+          '-loop', '1', '-t', segDur2.toFixed(2), '-i', scenePngs[2],
+          '-i', audioWavPath,
+          '-filter_complex', filterComplex,
+          '-map', '[vout]', '-map', '3:a',
+          '-t', String(job.durationSec),
+          ...codecArgs,
+          ...audioArgs,
+          outPath,
+        ],
+        (pct) => onStage(pct, `Encoding ${job.resolution} ${job.encoding.toUpperCase()} with audio`),
         totalFrames,
         abortSignal
       );

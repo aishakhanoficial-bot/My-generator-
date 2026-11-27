@@ -248,27 +248,152 @@ function loadPersisted(): StoredBrowserState {
   };
 }
 
-function selectPalette(prompt: string, seed: number) {
+type BrowserSceneTheme =
+  | 'spiritual-twilight'
+  | 'ocean'
+  | 'desert'
+  | 'forest'
+  | 'mountain'
+  | 'cyber'
+  | 'cosmos'
+  | 'sunset'
+  | 'studio';
+
+function detectBrowserTheme(prompt: string): BrowserSceneTheme {
   const p = prompt.toLowerCase();
-  if (/ocean|sea|water|whale|wave|underwater|blue|glacier/.test(p)) {
-    return { top: '#081c38', bottom: '#0e4e76', orbA: '#2dd4bf', orbB: '#38bdf8' };
+  if (
+    /آخرت|تیاری|قبر|جنت|نماز|مسجد|قرآن|دعا|اسلام|اللہ|رمضان|موت|عبادت|ایمان|akhirat|hereafter|mosque|islamic|prayer|quran|crescent|lantern|ramadan|eid|dua|eternity|soul|faith|heaven|spiritual/.test(
+      p
+    )
+  ) {
+    return 'spiritual-twilight';
   }
-  if (/sunset|golden|desert|sand|dune|lava|fire|autumn|amber/.test(p)) {
-    return { top: '#241026', bottom: '#9a3412', orbA: '#fb923c', orbB: '#facc15' };
+  if (/ocean|sea|water|whale|wave|underwater|coral|jellyfish|beach|river|سمندر|لہر|پانی/.test(p)) {
+    return 'ocean';
   }
-  if (/forest|jungle|moss|emerald|nature|garden|leaf|mountain/.test(p)) {
-    return { top: '#0a2018', bottom: '#14532d', orbA: '#4ade80', orbB: '#a3e635' };
+  if (/desert|sand|dune|oasis|camel|sahara|pyramid|صحرا|ریت/.test(p)) return 'desert';
+  if (/forest|jungle|moss|tree|pine|nature|garden|leaf|wood|جنگل|درخت/.test(p)) return 'forest';
+  if (/mountain|snow|alpine|peak|cliff|valley|aurora|waterfall|پہاڑ|برف/.test(p)) return 'mountain';
+  if (/cyber|neon|tokyo|city|rain|futuristic|synth|street|building|شہر|رات/.test(p)) return 'cyber';
+  if (/space|cosmos|galaxy|nebula|star|planet|astronaut|moon|universe|آسمان|ستارے|چاند/.test(p)) {
+    return 'cosmos';
   }
-  if (/cyber|neon|city|tokyo|night|rain|futuristic|synth/.test(p)) {
-    return { top: '#0c0e22', bottom: '#311042', orbA: '#22d3ee', orbB: '#f472b6' };
+  if (/sunset|sunrise|dawn|golden hour|amber|fire|lava|candle|غروب|طلوع|سورج/.test(p)) return 'sunset';
+  return 'studio';
+}
+
+function cleanBrowserCaption(rawPrompt: string): string {
+  const cleaned = rawPrompt
+    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, ' ')
+    .replace(/\b(veo\s*3|veo|sora|runway|master\s*prompt|prompt)\b/gi, ' ')
+    .replace(/\b(duration|aspect\s*ratio|resolution|camera|lighting|style)\s*[:：]\s*[^|\n]+/gi, ' ')
+    .replace(
+      /\b(exactly\s*\d+\s*seconds?|vertical\s*9:16|horizontal\s*16:9|square\s*1:1|9:16|16:9|1:1|ultra\s*realistic|photorealistic|cinematic\s*8k|8k|4k)\b/gi,
+      ' '
+    )
+    .replace(/[|–—]+/g, ' · ')
+    .replace(/\s*·\s*(·\s*)+/g, ' · ')
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s·\-:,]+|[\s·\-:,]+$/g, '')
+    .trim();
+  return cleaned || 'OpenFrame Studio';
+}
+
+function getBrowserPalette(theme: BrowserSceneTheme) {
+  switch (theme) {
+    case 'spiritual-twilight':
+      return {
+        top: '#060919',
+        mid: '#182449',
+        bottom: '#b45309',
+        glow: '#fde68a',
+        accent: '#fbbf24',
+        silBack: '#141b33',
+        silMid: '#0d1326',
+        silFront: '#060914',
+      };
+    case 'ocean':
+      return {
+        top: '#071b34',
+        mid: '#0e4c73',
+        bottom: '#14b8a6',
+        glow: '#67e8f9',
+        accent: '#2dd4bf',
+        silBack: '#0a3352',
+        silMid: '#07243b',
+        silFront: '#041422',
+      };
+    case 'desert':
+      return {
+        top: '#1f102b',
+        mid: '#7c2d12',
+        bottom: '#f59e0b',
+        glow: '#fef08a',
+        accent: '#fb923c',
+        silBack: '#6b2710',
+        silMid: '#431407',
+        silFront: '#220903',
+      };
+    case 'forest':
+      return {
+        top: '#071c16',
+        mid: '#114232',
+        bottom: '#3f7d47',
+        glow: '#bbf7d0',
+        accent: '#4ade80',
+        silBack: '#0d3326',
+        silMid: '#082219',
+        silFront: '#04120d',
+      };
+    case 'cyber':
+      return {
+        top: '#09091c',
+        mid: '#2e1065',
+        bottom: '#be185d',
+        glow: '#22d3ee',
+        accent: '#f472b6',
+        silBack: '#1e1b4b',
+        silMid: '#11102e',
+        silFront: '#070718',
+      };
+    case 'cosmos':
+      return {
+        top: '#030510',
+        mid: '#1e1b4b',
+        bottom: '#4c1d95',
+        glow: '#c4b5fd',
+        accent: '#38bdf8',
+        silBack: '#17153b',
+        silMid: '#0e0c26',
+        silFront: '#060514',
+      };
+    default:
+      return {
+        top: '#0b132b',
+        mid: '#1c2541',
+        bottom: '#3a506b',
+        glow: '#bae6fd',
+        accent: '#38bdf8',
+        silBack: '#1b263b',
+        silMid: '#111827',
+        silFront: '#070b14',
+      };
   }
-  const hue = seed % 360;
-  return {
-    top: `hsl(${hue}, 42%, 12%)`,
-    bottom: `hsl(${(hue + 35) % 360}, 48%, 24%)`,
-    orbA: `hsl(${(hue + 140) % 360}, 75%, 60%)`,
-    orbB: `hsl(${(hue + 210) % 360}, 75%, 58%)`,
-  };
+}
+
+function getThemeChordFreqs(theme: BrowserSceneTheme): number[] {
+  switch (theme) {
+    case 'spiritual-twilight':
+      return [146.83, 220.0, 293.66, 349.23];
+    case 'ocean':
+      return [130.81, 196.0, 246.94, 329.63];
+    case 'cyber':
+      return [110.0, 164.81, 220.0, 261.63];
+    case 'cosmos':
+      return [185.0, 277.18, 369.99, 440.0];
+    default:
+      return [196.0, 293.66, 392.0, 493.88];
+  }
 }
 
 function loadImgElement(src: string): Promise<HTMLImageElement> {
@@ -316,26 +441,85 @@ async function renderBrowserVideo(
     }
   }
 
-  const palette = selectPalette(job.prompt, job.seed);
-  const mimeCandidates = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4'];
+  const theme = detectBrowserTheme(job.prompt);
+  const pal = getBrowserPalette(theme);
+  const cleanCaption = cleanBrowserCaption(job.prompt);
+  const isRtl = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/.test(cleanCaption);
+
+  // Build real Web Audio API stereo soundscape track so exported WebM always includes audible audio
+  let audioCtx: AudioContext | null = null;
+  const videoStream = canvas.captureStream(job.fps);
+  const combinedTracks: MediaStreamTrack[] = [...videoStream.getVideoTracks()];
+
+  try {
+    const AudioCtx =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (AudioCtx) {
+      audioCtx = new AudioCtx();
+      if (audioCtx.state === 'suspended') {
+        await audioCtx.resume().catch(() => {});
+      }
+      const dest = audioCtx.createMediaStreamDestination();
+      const masterGain = audioCtx.createGain();
+      const now = audioCtx.currentTime;
+      const playSec = Math.min(3.5, Math.max(1.5, job.durationSec * 0.45));
+      masterGain.gain.setValueAtTime(0.001, now);
+      masterGain.gain.exponentialRampToValueAtTime(0.16, now + 0.35);
+      masterGain.gain.setValueAtTime(0.16, now + Math.max(0.4, playSec - 0.5));
+      masterGain.gain.exponentialRampToValueAtTime(0.001, now + playSec);
+      masterGain.connect(dest);
+
+      const freqs = getThemeChordFreqs(theme);
+      freqs.forEach((f, idx) => {
+        if (!audioCtx) return;
+        const osc = audioCtx.createOscillator();
+        const g = audioCtx.createGain();
+        osc.type = idx % 2 === 0 ? 'sine' : 'triangle';
+        osc.frequency.setValueAtTime(f, now);
+        g.gain.setValueAtTime(0.18 / (idx + 1), now);
+        osc.connect(g);
+        g.connect(masterGain);
+        osc.start(now);
+        osc.stop(now + playSec + 0.2);
+      });
+
+      const audioTracks = dest.stream.getAudioTracks();
+      if (audioTracks.length > 0) {
+        combinedTracks.push(...audioTracks);
+      }
+    }
+  } catch {
+    // Web Audio unavailable; fallback gracefully to video-only stream
+  }
+
+  const combinedStream = new MediaStream(combinedTracks);
+  const mimeCandidates = [
+    'video/webm;codecs=vp9,opus',
+    'video/webm;codecs=vp8,opus',
+    'video/webm;codecs=vp9',
+    'video/webm;codecs=vp8',
+    'video/webm',
+    'video/mp4',
+  ];
   const supportedMime =
     typeof MediaRecorder !== 'undefined'
       ? mimeCandidates.find((m) => MediaRecorder.isTypeSupported(m)) || 'video/webm'
       : 'video/webm';
 
-  const stream = canvas.captureStream(job.fps);
-  const recorder = new MediaRecorder(stream, { mimeType: supportedMime });
+  const recorder = new MediaRecorder(combinedStream, { mimeType: supportedMime });
   const chunks: BlobPart[] = [];
   recorder.ondataavailable = (e) => {
     if (e.data.size > 0) chunks.push(e.data);
   };
 
-  const renderMs = Math.min(2600, Math.max(1200, job.durationSec * 450));
-  const totalSteps = 24;
+  const renderMs = Math.min(3200, Math.max(1500, job.durationSec * 400));
+  const totalSteps = 30;
 
   const drawFrame = (tNorm: number) => {
     const w = canvas.width;
     const h = canvas.height;
+    const minDim = Math.min(w, h);
     ctx.clearRect(0, 0, w, h);
 
     if (startImg && job.workflow === 'image-to-video') {
@@ -351,43 +535,172 @@ async function renderBrowserVideo(
       ctx.globalAlpha = 1;
     } else if (refImgs.length > 0 && job.workflow === 'reference-image') {
       const idx = Math.min(refImgs.length - 1, Math.floor(tNorm * refImgs.length));
-      const scale = 1 + (tNorm * 0.12);
+      const scale = 1 + tNorm * 0.12;
       ctx.drawImage(refImgs[idx], (w - w * scale) / 2, (h - h * scale) / 2, w * scale, h * scale);
     } else {
-      const grad = ctx.createLinearGradient(0, 0, w * 0.25, h);
-      grad.addColorStop(0, palette.top);
-      grad.addColorStop(1, palette.bottom);
+      // Multi-scene illustrated Canvas renderer
+      const sceneIdx = tNorm < 0.34 ? 0 : tNorm < 0.67 ? 1 : 2;
+      const grad = ctx.createLinearGradient(0, 0, 0, h);
+      grad.addColorStop(0, pal.top);
+      grad.addColorStop(0.55, pal.mid);
+      grad.addColorStop(1, pal.bottom);
       ctx.fillStyle = grad;
       ctx.fillRect(0, 0, w, h);
 
-      const x1 = w * (0.25 + 0.45 * Math.sin(tNorm * Math.PI * 1.5 + (job.seed % 7)));
-      const y1 = h * (0.35 + 0.25 * Math.cos(tNorm * Math.PI));
-      const r1 = Math.max(w, h) * 0.42;
-      const g1 = ctx.createRadialGradient(x1, y1, 0, x1, y1, r1);
-      g1.addColorStop(0, palette.orbA);
-      g1.addColorStop(1, 'transparent');
-      ctx.globalAlpha = 0.55;
-      ctx.fillStyle = g1;
+      // Animated twinkling stars
+      for (let i = 0; i < 36; i++) {
+        const sx = (((job.seed * 19 + i * 137) % 96) / 100) * w;
+        const sy = (((job.seed * 31 + i * 89) % 58) / 100) * h;
+        const twinkle = 0.35 + 0.55 * Math.abs(Math.sin(tNorm * Math.PI * 2 + i));
+        ctx.fillStyle = pal.glow;
+        ctx.globalAlpha = twinkle;
+        ctx.beginPath();
+        ctx.arc(sx, sy, 1.4 + (i % 2), 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+
+      const horizonY = h * (sceneIdx === 1 ? 0.64 : 0.68);
+      const cx = w * 0.5;
+      const glowY = sceneIdx === 1 ? h * 0.44 : horizonY - minDim * 0.08;
+      const rg = ctx.createRadialGradient(cx, glowY, 0, cx, glowY, minDim * 0.48);
+      rg.addColorStop(0, pal.glow);
+      rg.addColorStop(0.5, pal.accent + '44');
+      rg.addColorStop(1, 'transparent');
+      ctx.fillStyle = rg;
       ctx.fillRect(0, 0, w, h);
 
-      const x2 = w * (0.75 - 0.4 * Math.cos(tNorm * Math.PI * 1.2));
-      const y2 = h * (0.65 - 0.3 * Math.sin(tNorm * Math.PI));
-      const g2 = ctx.createRadialGradient(x2, y2, 0, x2, y2, r1 * 0.9);
-      g2.addColorStop(0, palette.orbB);
-      g2.addColorStop(1, 'transparent');
-      ctx.fillStyle = g2;
-      ctx.fillRect(0, 0, w, h);
+      if (theme === 'spiritual-twilight') {
+        if (sceneIdx === 0) {
+          // Crescent moon + mosque domes silhouette
+          const mx = w * 0.68;
+          const my = h * 0.22;
+          const mr = minDim * 0.08;
+          ctx.fillStyle = '#fef3c7';
+          ctx.beginPath();
+          ctx.arc(mx, my, mr, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = pal.top;
+          ctx.beginPath();
+          ctx.arc(mx + mr * 0.34, my - mr * 0.24, mr * 0.88, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.fillStyle = pal.silFront;
+          const domeW = w * 0.42;
+          const domeTop = horizonY - minDim * 0.2;
+          ctx.beginPath();
+          ctx.moveTo(cx - domeW / 2, horizonY + 16);
+          ctx.quadraticCurveTo(cx, domeTop - minDim * 0.14, cx + domeW / 2, horizonY + 16);
+          ctx.fill();
+          ctx.fillRect(cx - domeW * 0.64, horizonY - minDim * 0.06, domeW * 1.28, h - horizonY + minDim * 0.08);
+          // Minarets
+          const minW = minDim * 0.036;
+          const minTop = horizonY - minDim * 0.32;
+          ctx.fillRect(cx - domeW * 0.66, minTop, minW, horizonY - minTop + 20);
+          ctx.fillRect(cx + domeW * 0.66 - minW, minTop, minW, horizonY - minTop + 20);
+        } else if (sceneIdx === 1) {
+          // Glowing hanging lantern
+          const lx = cx;
+          const ly = h * 0.43 + Math.sin(tNorm * Math.PI * 2) * 6;
+          const ls = minDim * 0.13;
+          ctx.strokeStyle = pal.accent;
+          ctx.lineWidth = 4;
+          ctx.beginPath();
+          ctx.moveTo(lx, 0);
+          ctx.lineTo(lx, ly - ls * 0.45);
+          ctx.stroke();
+          ctx.fillStyle = pal.glow;
+          ctx.fillRect(lx - ls * 0.48, ly - ls * 0.45, ls * 0.96, ls * 1.1);
+          ctx.strokeRect(lx - ls * 0.48, ly - ls * 0.45, ls * 0.96, ls * 1.1);
+        } else {
+          // Golden dawn over reflective water
+          ctx.fillStyle = '#fef3c7';
+          ctx.beginPath();
+          ctx.arc(cx, horizonY - minDim * 0.04, minDim * 0.11, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = pal.silMid;
+          ctx.fillRect(0, horizonY, w, h - horizonY);
+          ctx.fillStyle = pal.accent + '66';
+          ctx.fillRect(cx - minDim * 0.18, horizonY + 24, minDim * 0.36, 8);
+          ctx.fillRect(cx - minDim * 0.11, horizonY + 52, minDim * 0.22, 6);
+        }
+      } else {
+        // Layered horizon & silhouettes for ocean, desert, forest, cyber, cosmos, studio
+        ctx.fillStyle = pal.glow;
+        ctx.globalAlpha = 0.85;
+        ctx.beginPath();
+        ctx.arc(w * (0.4 + tNorm * 0.2), horizonY - minDim * 0.12, minDim * 0.09, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+
+        ctx.fillStyle = pal.silBack;
+        ctx.beginPath();
+        ctx.moveTo(0, horizonY + 30);
+        ctx.lineTo(w * 0.25, horizonY - 70);
+        ctx.lineTo(w * 0.55, horizonY + 20);
+        ctx.lineTo(w * 0.8, horizonY - 85);
+        ctx.lineTo(w, horizonY + 15);
+        ctx.lineTo(w, h);
+        ctx.lineTo(0, h);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = pal.silFront;
+        ctx.fillRect(0, horizonY + 45, w, h - horizonY);
+      }
+
+      // Floating light motes
+      for (let i = 0; i < 16; i++) {
+        const px = (((job.seed * 23 + i * 113) % 92 + 4) / 100) * w;
+        const py = (((job.seed * 41 + i * 79) % 70 + 10) / 100) * h - tNorm * 28;
+        ctx.fillStyle = pal.glow;
+        ctx.globalAlpha = 0.32;
+        ctx.beginPath();
+        ctx.arc(px, py, 2 + (i % 4), 0, Math.PI * 2);
+        ctx.fill();
+      }
       ctx.globalAlpha = 1;
+
+      // Frosted-glass bottom caption card showing clean prompt text
+      const boxW = w * 0.86;
+      const boxH = minDim * 0.15;
+      const boxX = (w - boxW) / 2;
+      const boxY = h - boxH - h * 0.07;
+      ctx.fillStyle = 'rgba(2, 6, 23, 0.72)';
+      ctx.strokeStyle = pal.accent + '66';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(boxX, boxY, boxW, boxH, 14);
+      ctx.fill();
+      ctx.stroke();
+
+      const fontSize = Math.max(18, Math.round(minDim * 0.042));
+      ctx.fillStyle = '#f8fafc';
+      ctx.font = `bold ${fontSize}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.direction = isRtl ? 'rtl' : 'ltr';
+      const label = cleanCaption.length > 48 ? `${cleanCaption.slice(0, 45).trim()}...` : cleanCaption;
+      ctx.fillText(label, cx, boxY + boxH / 2, boxW - 28);
+      ctx.direction = 'ltr';
     }
   };
 
   return new Promise((resolve, reject) => {
+    const closeAudio = () => {
+      if (audioCtx) {
+        audioCtx.close().catch(() => {});
+        audioCtx = null;
+      }
+    };
+
     const onAbort = () => {
       try {
         if (recorder.state !== 'inactive') recorder.stop();
       } catch {
         // Ignore
       }
+      closeAudio();
       reject(new Error('Job cancelled by user.'));
     };
 
@@ -399,6 +712,7 @@ async function renderBrowserVideo(
 
     recorder.onstop = () => {
       signal.removeEventListener('abort', onAbort);
+      closeAudio();
       const blob = new Blob(chunks, { type: supportedMime });
       const blobUrl = URL.createObjectURL(blob);
       resolve({ blobUrl, bytes: blob.size, mimeType: supportedMime });
@@ -413,7 +727,7 @@ async function renderBrowserVideo(
       const tNorm = step / totalSteps;
       drawFrame(tNorm);
       const pct = Math.min(96, Math.max(10, Math.round(10 + tNorm * 85)));
-      onProgress(pct, `Synthesizing frames in browser (${pct}%)`);
+      onProgress(pct, `Rendering scenes & audio in browser (${pct}%)`);
       step++;
       if (step <= totalSteps) {
         setTimeout(tick, stepDelay);
@@ -677,7 +991,7 @@ class BrowserStaticRuntime {
           );
         }
 
-        const cacheKey = `${job.workflow}:${job.prompt}:${job.modelId}:${job.resolution}:${job.aspectRatio}:${job.durationSec}:${job.seed}`;
+        const cacheKey = `v2:${job.workflow}:${job.prompt}:${job.modelId}:${job.resolution}:${job.aspectRatio}:${job.durationSec}:${job.seed}`;
         const cached = this.state.config.cacheEnabled && job.useCache ? this.cacheUrls.get(cacheKey) : undefined;
         if (cached) {
           this.videoUrls.set(job.id, cached.url);

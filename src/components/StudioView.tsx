@@ -1017,7 +1017,15 @@ export function StudioView({
 
             {previewJob && getVideoStreamUrl(previewJob.id) ? (
               <div>
-                <div className="bg-black aspect-video flex items-center justify-center">
+                <div
+                  className={`bg-black flex items-center justify-center ${
+                    previewJob.aspectRatio === '9:16'
+                      ? 'aspect-[9/16] max-h-[520px] mx-auto'
+                      : previewJob.aspectRatio === '1:1'
+                      ? 'aspect-square max-h-[480px] mx-auto'
+                      : 'aspect-video'
+                  }`}
+                >
                   <video
                     key={previewJob.id}
                     src={getVideoStreamUrl(previewJob.id)}
