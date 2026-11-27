@@ -1,0 +1,6 @@
+{
+  "name": "OpenFrame Studio",
+  "description": "Zero-credit self-hosted AI video generation workstation with batch queueing, open-source model management, and GPU worker orchestration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
