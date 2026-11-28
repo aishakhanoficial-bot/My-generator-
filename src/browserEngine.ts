@@ -263,7 +263,7 @@ type BrowserSceneTheme =
 function detectBrowserTheme(prompt: string): BrowserSceneTheme {
   const p = prompt.toLowerCase();
   if (
-    /garden|flower|flowers|rose|tulip|lavender|jasmine|blossom|butterfly|butterflies|meadow|exotic\s*bird|turquoise.*bird|باغ|پھول|تتلی|چمن/.test(
+    /garden|flower|flowers|wildflower|rose|tulip|lavender|jasmine|blossom|butterfly|butterflies|meadow|baby\s*bird|exotic\s*bird|turquoise.*bird|wet\s*stone.*stream|باغ|پھول|تتلی|چمن/.test(
       p
     )
   ) {
@@ -383,9 +383,9 @@ function getBrowserPalette(theme: BrowserSceneTheme) {
   switch (theme) {
     case 'garden':
       return {
-        top: '#1e3a8a',
-        mid: '#f59e0b',
-        bottom: '#fde68a',
+        top: '#38bdf8',
+        mid: '#bae6fd',
+        bottom: '#fef3c7',
         glow: '#fef08a',
         accent: '#f59e0b',
         silBack: '#15803d',
@@ -1082,8 +1082,14 @@ async function renderBrowserVideo(
         ctx.globalAlpha = 1;
       }
 
-      // Garden + exotic bird dedicated composition when prompt requests garden/flowers/bird/stream
+      // Living garden / stream / wet-stone / talking baby bird true-motion composition
       if (effectiveTheme === 'garden') {
+        const fullLower = job.prompt.toLowerCase();
+        const isWetStoneStream = /wet\s*stone|stone|pebble|baby\s*bird|turquoise-and-cream|turquoise\s+and\s+cream/.test(
+          fullLower
+        );
+        const isCreamBabyBird = /cream|baby\s*bird/.test(fullLower);
+
         const gGrad = ctx.createLinearGradient(0, 0, 0, h);
         gGrad.addColorStop(0, pal.top);
         gGrad.addColorStop(0.55, pal.mid);
@@ -1091,19 +1097,31 @@ async function renderBrowserVideo(
         ctx.fillStyle = gGrad;
         ctx.fillRect(0, 0, w, h);
 
-        const gHorizon = h * 0.62;
-        const sunX = w * (sceneIdx === 1 ? 0.72 : 0.5);
-        const sunY = gHorizon - minDim * 0.14;
+        const camZoom =
+          tNorm < 0.45
+            ? 1 + (tNorm / 0.45) * 0.24
+            : tNorm < 0.72
+            ? 1.24
+            : 1.24 - ((tNorm - 0.72) / 0.28) * 0.16;
+        const camFocusY = h * 0.47;
+
+        ctx.save();
+        ctx.translate(cx * (1 - camZoom), camFocusY * (1 - camZoom));
+        ctx.scale(camZoom, camZoom);
+
+        const gHorizon = h * 0.56;
+        const sunX = w * (0.48 + Math.sin(tNorm * Math.PI) * 0.08);
+        const sunY = gHorizon - minDim * 0.22;
         ctx.fillStyle = '#fef9c3';
         ctx.beginPath();
-        ctx.arc(sunX, sunY, minDim * 0.13, 0, Math.PI * 2);
+        ctx.arc(sunX, sunY, minDim * 0.11, 0, Math.PI * 2);
         ctx.fill();
 
-        // Meadow hills + crystal-clear stream
+        // Green meadow & soft plants
         ctx.fillStyle = '#15803d';
         ctx.beginPath();
-        ctx.moveTo(0, gHorizon + 12);
-        ctx.quadraticCurveTo(w * 0.3, gHorizon - 40, w, gHorizon + 8);
+        ctx.moveTo(0, gHorizon + 8);
+        ctx.quadraticCurveTo(w * 0.28, gHorizon - 38, w, gHorizon + 10);
         ctx.lineTo(w, h);
         ctx.lineTo(0, h);
         ctx.closePath();
@@ -1111,128 +1129,204 @@ async function renderBrowserVideo(
 
         ctx.fillStyle = '#166534';
         ctx.beginPath();
-        ctx.moveTo(0, gHorizon + 45);
-        ctx.quadraticCurveTo(w * 0.65, gHorizon + 10, w, gHorizon + 48);
+        ctx.moveTo(0, gHorizon + 42);
+        ctx.quadraticCurveTo(w * 0.65, gHorizon + 14, w, gHorizon + 48);
         ctx.lineTo(w, h);
         ctx.lineTo(0, h);
         ctx.closePath();
         ctx.fill();
 
-        if (sceneIdx !== 1) {
-          ctx.fillStyle = 'rgba(56, 189, 248, 0.85)';
+        // Clear flowing stream + animated ripples
+        ctx.fillStyle = 'rgba(14, 165, 233, 0.72)';
+        ctx.beginPath();
+        ctx.moveTo(0, gHorizon + 56);
+        ctx.quadraticCurveTo(w * 0.45, gHorizon + 34, w, gHorizon + 62);
+        ctx.lineTo(w, h);
+        ctx.lineTo(0, h);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = 'rgba(224, 242, 254, 0.62)';
+        for (let i = 0; i < 9; i++) {
+          const ry = gHorizon + 72 + i * (h * 0.032);
+          const rx = ((w * 0.12 + i * w * 0.11 + tNorm * w * 0.55) % (w * 0.9)) + w * 0.05;
+          const rw = minDim * (0.06 + (i % 3) * 0.025);
           ctx.beginPath();
-          ctx.moveTo(w * 0.42, gHorizon + 16);
-          ctx.quadraticCurveTo(w * 0.62, gHorizon + 95, w * 0.35, h);
-          ctx.lineTo(w * 0.68, h);
-          ctx.quadraticCurveTo(w * 0.8, gHorizon + 95, w * 0.52, gHorizon + 16);
-          ctx.closePath();
+          ctx.ellipse(rx, ry, rw, 3.5, 0, 0, Math.PI * 2);
           ctx.fill();
         }
 
-        // Flowering tree branch
-        const branchY = sceneIdx === 1 ? h * 0.56 : h * 0.44;
-        ctx.strokeStyle = '#57341a';
-        ctx.lineWidth = minDim * 0.04;
-        ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.moveTo(0, branchY + 55);
-        ctx.quadraticCurveTo(w * 0.38, branchY - 10, w * 0.86, branchY + 18);
-        ctx.stroke();
-
-        // Blossoms
-        [0.16, 0.28, 0.42, 0.64, 0.78, 0.86].forEach((px, idx) => {
-          const bx = w * px;
-          const by = branchY + (idx % 2 === 0 ? -18 : 14);
-          const r = minDim * (sceneIdx === 1 ? 0.042 : 0.032);
-          ctx.fillStyle = idx % 2 === 0 ? '#fbcfe8' : '#ffffff';
-          ctx.beginPath();
-          ctx.arc(bx, by, r, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.fillStyle = '#facc15';
-          ctx.beginPath();
-          ctx.arc(bx, by, r * 0.36, 0, Math.PI * 2);
-          ctx.fill();
-        });
-
-        // Garden flowers
-        const flowerColors = ['#ffffff', '#f472b6', '#a855f7', '#fb7185', '#fef08a', '#c084fc'];
-        for (let i = 0; i < 12; i++) {
+        // Swaying purple wildflowers & garden blossoms
+        const sway = Math.sin(tNorm * Math.PI * 4) * 8;
+        const flowerColors = /purple\s*wildflower/.test(fullLower)
+          ? ['#a855f7', '#c084fc', '#9333ea', '#e879f9', '#d8b4fe']
+          : ['#ffffff', '#f472b6', '#a855f7', '#fb7185', '#fef08a', '#c084fc'];
+        for (let i = 0; i < 14; i++) {
           const fx = (((job.seed * 13 + i * 71) % 90) + 5) * (w / 100);
-          const fy = gHorizon + 55 + ((i * 29) % Math.max(40, h * 0.22));
+          const fy = gHorizon + 12 + ((i * 29) % Math.max(40, h * 0.2));
           const fr = minDim * 0.024;
+          const localSway = sway * (i % 2 === 0 ? 1 : -0.8);
           ctx.strokeStyle = '#14532d';
           ctx.lineWidth = 3;
           ctx.beginPath();
-          ctx.moveTo(fx, fy);
-          ctx.lineTo(fx, fy + 24);
+          ctx.moveTo(fx, fy + 28);
+          ctx.quadraticCurveTo(fx + localSway * 0.5, fy + 14, fx + localSway, fy);
           ctx.stroke();
           ctx.fillStyle = flowerColors[i % flowerColors.length];
           ctx.beginPath();
-          ctx.arc(fx, fy, fr, 0, Math.PI * 2);
+          ctx.arc(fx + localSway, fy, fr, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#fef08a';
+          ctx.beginPath();
+          ctx.arc(fx + localSway, fy, fr * 0.35, 0, Math.PI * 2);
           ctx.fill();
         }
 
-        // Exotic Turquoise/Violet/Gold Bird on the branch
-        const bs = sceneIdx === 1 ? minDim / 300 : minDim / 520;
-        const bx = w * 0.5;
-        const by = branchY - 12 * bs;
-        ctx.fillStyle = '#6d28d9';
+        // Wet stone perch OR curved flowering tree branch
+        const perchY = h * 0.56;
+        const bs = minDim / 335;
+        if (isWetStoneStream) {
+          ctx.strokeStyle = `rgba(224, 242, 254, ${0.45 + 0.3 * Math.sin(tNorm * Math.PI * 8)})`;
+          ctx.lineWidth = 2.5;
+          ctx.beginPath();
+          ctx.ellipse(cx, perchY + 62 * bs, 86 * bs, 16 * bs, 0, 0, Math.PI * 2);
+          ctx.stroke();
+
+          ctx.fillStyle = '#475569';
+          ctx.beginPath();
+          ctx.moveTo(cx - 88 * bs, perchY + 66 * bs);
+          ctx.quadraticCurveTo(cx - 70 * bs, perchY + 14 * bs, cx, perchY + 18 * bs);
+          ctx.quadraticCurveTo(cx + 76 * bs, perchY + 16 * bs, cx + 90 * bs, perchY + 66 * bs);
+          ctx.closePath();
+          ctx.fill();
+
+          ctx.fillStyle = 'rgba(148, 163, 184, 0.48)';
+          ctx.beginPath();
+          ctx.ellipse(cx - 12 * bs, perchY + 26 * bs, 44 * bs, 9 * bs, 0, 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          ctx.strokeStyle = '#57341a';
+          ctx.lineWidth = minDim * 0.04;
+          ctx.lineCap = 'round';
+          ctx.beginPath();
+          ctx.moveTo(0, perchY + 55);
+          ctx.quadraticCurveTo(w * 0.38, perchY - 8, w * 0.88, perchY + 22);
+          ctx.stroke();
+        }
+
+        // Animated talking, blinking, head-tilting turquoise-and-cream / exotic bird
+        const bx = cx;
+        const by = isWetStoneStream ? perchY - 30 * bs : perchY - 16 * bs;
+        const beakWave = Math.max(0, Math.sin(tNorm * Math.PI * 22) * 0.65 + Math.sin(tNorm * Math.PI * 37) * 0.35);
+        const beakGap = beakWave * 9 * bs;
+        const headTilt = Math.sin(tNorm * Math.PI * 6) * 0.095;
+        const wingLift = Math.sin(tNorm * Math.PI * 10) * 6 * bs;
+        const breath = 1 + Math.sin(tNorm * Math.PI * 8) * 0.025;
+        const blinkPhase = (tNorm * 3.4) % 1;
+        const isBlinking = blinkPhase > 0.91 && blinkPhase < 0.97;
+
+        const bodyColor = isCreamBabyBird ? '#14b8a6' : '#06b6d4';
+        const chestColor = isCreamBabyBird ? '#fef3c7' : '#facc15';
+        const wingColor = isCreamBabyBird ? '#0d9488' : '#7c3aed';
+        const tailColor = isCreamBabyBird ? '#0f766e' : '#6d28d9';
+        const headColor = isCreamBabyBird ? '#2dd4bf' : '#0891b2';
+        const crestColor = isCreamBabyBird ? '#5eead4' : '#a855f7';
+
+        ctx.fillStyle = tailColor;
         ctx.beginPath();
         ctx.moveTo(bx - 16 * bs, by + 16 * bs);
-        ctx.lineTo(bx - 52 * bs, by + 64 * bs);
-        ctx.lineTo(bx - 22 * bs, by + 58 * bs);
+        ctx.lineTo(bx - 50 * bs, by + 58 * bs + wingLift * 0.5);
+        ctx.lineTo(bx - 22 * bs, by + 54 * bs);
         ctx.closePath();
         ctx.fill();
 
-        ctx.fillStyle = '#06b6d4';
+        ctx.fillStyle = bodyColor;
         ctx.beginPath();
-        ctx.ellipse(bx, by + 12 * bs, 28 * bs, 38 * bs, -0.2, 0, Math.PI * 2);
+        ctx.ellipse(bx, by + 12 * bs, 28 * bs * breath, 37 * bs, -0.17, 0, Math.PI * 2);
         ctx.fill();
 
-        ctx.fillStyle = '#facc15';
+        ctx.fillStyle = chestColor;
         ctx.beginPath();
-        ctx.ellipse(bx + 9 * bs, by + 16 * bs, 16 * bs, 26 * bs, 0, 0, Math.PI * 2);
+        ctx.ellipse(bx + 9 * bs, by + 16 * bs, 17 * bs * breath, 26 * bs, 0, 0, Math.PI * 2);
         ctx.fill();
 
-        ctx.fillStyle = '#7c3aed';
+        ctx.fillStyle = wingColor;
         ctx.beginPath();
-        ctx.ellipse(bx - 12 * bs, by + 16 * bs, 14 * bs, 24 * bs, 0.2, 0, Math.PI * 2);
+        ctx.moveTo(bx - 22 * bs, by - 2 * bs - wingLift * 0.4);
+        ctx.quadraticCurveTo(bx - 38 * bs, by + 18 * bs - wingLift, bx - 12 * bs, by + 40 * bs - wingLift * 0.3);
+        ctx.quadraticCurveTo(bx + 6 * bs, by + 22 * bs, bx - 2 * bs, by - 2 * bs);
         ctx.fill();
 
-        ctx.fillStyle = '#0891b2';
+        const hx = bx + 6 * bs;
+        const hy = by - 26 * bs;
+        ctx.save();
+        ctx.translate(hx, hy);
+        ctx.rotate(headTilt);
+
+        ctx.fillStyle = crestColor;
         ctx.beginPath();
-        ctx.arc(bx + 6 * bs, by - 26 * bs, 21 * bs, 0, Math.PI * 2);
+        ctx.moveTo(-8 * bs, -16 * bs);
+        ctx.quadraticCurveTo(-18 * bs, -34 * bs, -28 * bs, -22 * bs);
+        ctx.quadraticCurveTo(-14 * bs, -16 * bs, 0, -18 * bs);
         ctx.fill();
 
-        ctx.fillStyle = '#0f172a';
+        ctx.fillStyle = headColor;
         ctx.beginPath();
-        ctx.arc(bx + 13 * bs, by - 29 * bs, 6 * bs, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = '#ffffff';
-        ctx.beginPath();
-        ctx.arc(bx + 15 * bs, by - 31 * bs, 2 * bs, 0, Math.PI * 2);
+        ctx.arc(0, 0, 21 * bs, 0, Math.PI * 2);
         ctx.fill();
 
-        const beakOpen = sceneIdx === 1 && Math.sin(tNorm * 35) > 0;
+        if (isBlinking) {
+          ctx.strokeStyle = '#0f172a';
+          ctx.lineWidth = Math.max(2, 3 * bs);
+          ctx.beginPath();
+          ctx.moveTo(2 * bs, -2 * bs);
+          ctx.quadraticCurveTo(7 * bs, 3 * bs, 13 * bs, -2 * bs);
+          ctx.stroke();
+        } else {
+          ctx.fillStyle = '#0f172a';
+          ctx.beginPath();
+          ctx.arc(7 * bs, -3 * bs, 6.2 * bs, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#ffffff';
+          ctx.beginPath();
+          ctx.arc(9 * bs, -5 * bs, 2.2 * bs, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
         ctx.fillStyle = '#f97316';
         ctx.beginPath();
-        ctx.moveTo(bx + 24 * bs, by - 29 * bs);
-        ctx.lineTo(bx + 44 * bs, by - (beakOpen ? 27 : 23) * bs);
-        ctx.lineTo(bx + 24 * bs, by - (beakOpen ? 21 : 17) * bs);
+        ctx.moveTo(18 * bs, -3 * bs);
+        ctx.lineTo(38 * bs, -2 * bs - beakGap * 0.45);
+        ctx.lineTo(18 * bs, 3 * bs);
         ctx.closePath();
         ctx.fill();
 
-        // Butterflies
-        [
-          { x: w * 0.22 + Math.sin(tNorm * 10) * 18, y: h * 0.32, c: '#f472b6' },
-          { x: w * 0.78 - Math.cos(tNorm * 9) * 16, y: h * 0.28, c: '#38bdf8' },
-        ].forEach((bt) => {
-          ctx.fillStyle = bt.c;
-          ctx.beginPath();
-          ctx.ellipse(bt.x - 7, bt.y, 8, 5, 0, 0, Math.PI * 2);
-          ctx.ellipse(bt.x + 7, bt.y, 8, 5, 0, 0, Math.PI * 2);
-          ctx.fill();
-        });
+        ctx.fillStyle = '#ea580c';
+        ctx.beginPath();
+        ctx.moveTo(18 * bs, 3 * bs);
+        ctx.lineTo(35 * bs, 5 * bs + beakGap);
+        ctx.lineTo(17 * bs, 8 * bs + beakGap * 0.4);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.restore();
+
+        // Butterflies when mentioned
+        if (/butterfly|butterflies|تتلی/.test(fullLower)) {
+          const wf = 0.45 + 0.55 * Math.abs(Math.sin(tNorm * Math.PI * 16));
+          [
+            { x: w * 0.24 + Math.sin(tNorm * Math.PI * 4) * 26, y: h * 0.32, c: '#f472b6' },
+            { x: w * 0.76 - Math.cos(tNorm * Math.PI * 3) * 22, y: h * 0.29, c: '#38bdf8' },
+          ].forEach((bt) => {
+            ctx.fillStyle = bt.c;
+            ctx.beginPath();
+            ctx.ellipse(bt.x - 7 * wf, bt.y, 9 * wf, 6, 0, 0, Math.PI * 2);
+            ctx.ellipse(bt.x + 7 * wf, bt.y, 9 * wf, 6, 0, 0, Math.PI * 2);
+            ctx.fill();
+          });
+        }
+
+        ctx.restore();
       }
 
       // Frosted-glass bottom caption card matching the current scene beat or exact dialogue
@@ -1567,7 +1661,7 @@ class BrowserStaticRuntime {
           );
         }
 
-        const cacheKey = `v4:${job.workflow}:${job.prompt}:${job.modelId}:${job.resolution}:${job.aspectRatio}:${job.durationSec}:${job.seed}`;
+        const cacheKey = `v5:${job.workflow}:${job.prompt}:${job.modelId}:${job.resolution}:${job.aspectRatio}:${job.durationSec}:${job.seed}`;
         const cached = this.state.config.cacheEnabled && job.useCache ? this.cacheUrls.get(cacheKey) : undefined;
         if (cached) {
           this.videoUrls.set(job.id, cached.url);

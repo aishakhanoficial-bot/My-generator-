@@ -73,7 +73,7 @@ export function computeCacheKey(job: VideoJob, assets?: JobInputAssets): string 
     .createHash('sha256')
     .update(
       JSON.stringify({
-        version: 'v4-prompt-matched',
+        version: 'v5-true-motion',
         workflow: job.workflow,
         prompt: job.prompt.trim(),
         negativePrompt: (job.negativePrompt ?? '').trim(),
@@ -556,10 +556,18 @@ export async function executeVideoJob(
   if (!outPath) throw new Error('Invalid output path.');
 
   const tempFiles: string[] = [];
+  const tempDirs: string[] = [];
   const cleanupTemps = () => {
     for (const f of tempFiles) {
       try {
         if (fs.existsSync(f)) fs.unlinkSync(f);
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
+    for (const d of tempDirs) {
+      try {
+        if (fs.existsSync(d)) fs.rmSync(d, { recursive: true, force: true });
       } catch {
         // Ignore cleanup errors
       }
@@ -789,66 +797,46 @@ export async function executeVideoJob(
         );
       }
     } else {
-      // Text-to-Video: Multi-scene illustrated SVG storyboard + motion transitions + audio
-      onStage(34, `Rendering 3 illustrated scenes for ${storyboard.theme}`);
+      // Text-to-Video: True frame-by-frame animated SVG motion sequence (never static Ken Burns) + audio
+      const animFps = 12;
+      const animFrames = Math.min(144, Math.max(36, Math.round(job.durationSec * animFps)));
+      const seqDir = resolveSafeFilePath(UPLOADS_DIR, `${job.id}_seq`);
+      if (!seqDir) throw new Error('Invalid temp frame sequence directory.');
+      fs.mkdirSync(seqDir, { recursive: true });
+      tempDirs.push(seqDir);
 
-      const scenePngs: string[] = [];
-      for (const idx of [0, 1, 2] as const) {
-        const svgPath = resolveSafeFilePath(UPLOADS_DIR, `${job.id}_scene${idx}.svg`);
-        const pngPath = resolveSafeFilePath(UPLOADS_DIR, `${job.id}_scene${idx}.png`);
-        if (!svgPath || !pngPath) throw new Error('Invalid temp scene path.');
-        tempFiles.push(svgPath, pngPath);
+      onStage(34, `Generating ${animFrames} live motion frames for ${storyboard.theme}`);
 
+      for (let i = 0; i < animFrames; i++) {
+        if (abortSignal.aborted) throw new Error('Job cancelled by user.');
+        const tNorm = animFrames > 1 ? i / (animFrames - 1) : 0;
+        const sceneIdx: 0 | 1 | 2 = tNorm < 0.34 ? 0 : tNorm < 0.67 ? 1 : 2;
         const svgMarkup = renderSceneSvg({
           theme: storyboard.theme,
-          sceneIndex: idx,
+          sceneIndex: sceneIdx,
           width,
           height,
-          caption: storyboard.sceneCaptions[idx],
-          beatPrompt: storyboard.sceneBeats[idx],
-          objectTags: storyboard.sceneObjectTags?.[idx],
+          caption: storyboard.sceneCaptions[sceneIdx],
+          beatPrompt: storyboard.sceneBeats[sceneIdx],
+          objectTags: storyboard.sceneObjectTags?.[sceneIdx],
           fullPrompt: job.prompt,
           seed: job.seed,
+          tNorm,
         });
-        fs.writeFileSync(svgPath, svgMarkup, 'utf8');
-        await runFfmpeg(['-y', '-i', svgPath, '-frames:v', '1', pngPath], undefined, undefined, abortSignal);
-        scenePngs.push(pngPath);
+        const frameFile = path.join(seqDir, `frame_${String(i).padStart(4, '0')}.svg`);
+        fs.writeFileSync(frameFile, svgMarkup, 'utf8');
       }
 
-      onStage(52, `Compositing scenes & encoding ${job.resolution} ${job.encoding.toUpperCase()} + audio`);
-
-      const fadeDur = Math.min(0.6, job.durationSec * 0.16);
-      const step = job.durationSec / 3;
-      const segDur0 = step + fadeDur;
-      const segDur1 = step + fadeDur;
-      const segDur2 = Math.max(1.0, job.durationSec - step * 2 + fadeDur);
-      const off1 = Math.max(0.4, step - fadeDur * 0.5);
-      const off2 = Math.max(off1 + 0.4, step * 2 - fadeDur * 0.5);
-
-      const segFrames0 = Math.max(12, Math.round(segDur0 * job.fps));
-      const segFrames1 = Math.max(12, Math.round(segDur1 * job.fps));
-      const segFrames2 = Math.max(12, Math.round(segDur2 * job.fps));
-
-      const sw = Math.round(width * 1.12 / 2) * 2;
-      const sh = Math.round(height * 1.12 / 2) * 2;
-
-      const filterComplex = [
-        `[0:v]scale=${sw}:${sh},zoompan=z='min(zoom+0.0012,1.10)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${segFrames0}:s=${width}x${height}:fps=${job.fps},setsar=1[v0]`,
-        `[1:v]scale=${sw}:${sh},zoompan=z='if(lte(zoom,1.0),1.10,max(1.0,zoom-0.0010))':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${segFrames1}:s=${width}x${height}:fps=${job.fps},setsar=1[v1]`,
-        `[2:v]scale=${sw}:${sh},zoompan=z='min(zoom+0.0012,1.10)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${segFrames2}:s=${width}x${height}:fps=${job.fps},setsar=1[v2]`,
-        `[v0][v1]xfade=transition=fade:duration=${fadeDur.toFixed(2)}:offset=${off1.toFixed(2)}[x1]`,
-        `[x1][v2]xfade=transition=smoothleft:duration=${fadeDur.toFixed(2)}:offset=${off2.toFixed(2)},vignette=PI/6,format=yuv420p[vout]`,
-      ].join(';');
+      onStage(54, `Encoding live motion frames (${job.resolution} ${job.encoding.toUpperCase()}) + audio`);
 
       await runFfmpeg(
         [
           '-y',
-          '-loop', '1', '-t', segDur0.toFixed(2), '-i', scenePngs[0],
-          '-loop', '1', '-t', segDur1.toFixed(2), '-i', scenePngs[1],
-          '-loop', '1', '-t', segDur2.toFixed(2), '-i', scenePngs[2],
+          '-framerate', String(animFps),
+          '-i', path.join(seqDir, 'frame_%04d.svg'),
           '-i', audioWavPath,
-          '-filter_complex', filterComplex,
-          '-map', '[vout]', '-map', '3:a',
+          '-vf', `fps=${job.fps},scale=${width}:${height},setsar=1,vignette=PI/6,format=yuv420p`,
+          '-map', '0:v', '-map', '1:a',
           '-t', String(job.durationSec),
           ...codecArgs,
           ...audioArgs,
